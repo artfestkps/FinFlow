@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FinFlow - Personal Finance & Shared Ledger</title>
+  
+  <!-- PWA & Mobile Meta Tags -->
+  <meta name="theme-color" content="#0F172A">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FinFlow">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./public/icons/logo.svg">
+  <link rel="apple-touch-icon" href="./public/icons/icon-192.png">
+
+  <!-- Tailwind CSS & Icons & Charts -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            fin: {
+              emerald: '#10B981',
+              emeraldDark: '#059669',
+              slate: '#0B1120',
+              card: 'rgba(30, 41, 59, 0.7)',
+              indigo: '#6366F1'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Firebase Web SDK (Compat mode for zero-build PWA) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body class="bg-[#0B1120] text-slate-100 flex flex-col min-h-screen pb-20 sm:pb-8 selection:bg-emerald-500 selection:text-white">
+
+  <!-- ================= WELCOME / SIGN-IN GATE ================= -->
+  <div id="auth-gate-screen" class="fixed inset-0 z-50 bg-[#0B1120] flex items-center justify-center p-4">
+    <div class="glass-panel w-full max-w-md rounded-3xl p-8 border border-slate-700/80 bg-slate-900/95 shadow-2xl relative overflow-hidden text-center">
+      
+      <!-- Ambient Glow Behind Logo -->
+      <div class="absolute -top-12 left-1/2 -translate-x-1/2 w-48 h-48 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none"></div>
+
+      <!-- Brand Logo -->
+      <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-0.5 shadow-xl shadow-emerald-500/25 flex items-center justify-center mb-5">
+        <div class="w-full h-full bg-slate-900 rounded-[14px] flex items-center justify-center">
+          <svg class="w-9 h-9 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+        </div>
+      </div>
+
+      <h1 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Welcome to FinFlow</h1>
+      <p class="text-xs sm:text-sm text-slate-400 mt-2 leading-relaxed">
+        Personal finance, instant liquid money tracking, debt ledgers & shared group bill splitting.
+      </p>
+
+      <div class="mt-8 space-y-4 text-left">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1.5">Your Name (Optional)</label>
+          <input type="text" id="auth-custom-name" placeholder="e.g. John Doe (or uses Google name)" class="w-full bg-slate-800/90 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <button onclick="app.signInWithGoogle()" 
+          class="w-full py-3.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm flex items-center justify-center space-x-3 shadow-lg shadow-white/10 active:scale-[0.98] transition">
+          <!-- Google "G" Icon -->
+          <svg class="w-5 h-5" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+          </svg>
+          <span>Continue with Google</span>
+        </button>
+
+        <p class="text-center text-[11px] text-slate-400 mt-2">
+          🔒 Secure authentication via Google Firebase. Keeps you permanently signed in on this device.
+        </p>
+
+        <div class="pt-3 text-center border-t border-slate-800">
+          <button onclick="app.continueAsGuest()" class="text-xs text-slate-400 hover:text-emerald-400 underline transition">
+            Continue in Offline Guest Mode
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- TOP APP BAR -->
+  <header class="sticky top-0 z-40 bg-[#0F172A]/90 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-6 lg:px-8 py-3">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 md:gap-0">
+      
+      <!-- Brand Logo -->
+      <div class="w-full md:w-auto flex items-center justify-between">
+        <div class="flex items-center space-x-3 cursor-pointer" onclick="app.switchTab('dashboard')">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-0.5 shadow-lg shadow-emerald-500/20 flex items-center justify-center">
+            <div class="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center">
+              <svg class="w-6 h-6 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+              </svg>
+            </div>
+          </div>
+          <div>
+            <span class="font-extrabold text-xl tracking-tight bg-gradient-to-r from-white via-slate-100 to-emerald-400 bg-clip-text text-transparent">FinFlow</span>
+            <span class="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full ml-1.5 border border-emerald-500/20">PWA</span>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+          <!-- User Profile & Sign Out Button -->
+          <div id="header-user-pill" class="hidden flex items-center space-x-2 bg-slate-800/90 border border-slate-700/80 rounded-xl px-2.5 py-1">
+            <img id="header-user-avatar" src="./public/icons/icon-192.png" class="w-6 h-6 rounded-full border border-emerald-400 object-cover">
+            <span id="header-user-name" class="text-xs font-bold text-slate-200 hidden sm:inline">User</span>
+            <button onclick="app.signOutFirebase()" title="Sign Out" class="text-slate-400 hover:text-rose-400 ml-1 p-0.5 transition">
+              <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+
+          <button id="pwa-install-btn" class="hidden bg-emerald-500 hover:bg-emerald-600 text-slate-950 px-3 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-emerald-500/20 transition">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            <span>Install</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Navigation Ribbon (Only Navigation Buttons as requested) -->
+      <nav class="w-full md:w-auto flex items-center space-x-1.5 overflow-x-auto scrollbar-none py-1 px-1 bg-slate-900/90 rounded-2xl border border-slate-800">
+        <button data-tab="dashboard" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-xs sm:text-sm transition flex items-center space-x-1.5 text-emerald-400 bg-slate-800/80 font-semibold">
+          <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+          <span>Dashboard</span>
+        </button>
+        <button data-tab="accounts" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-xs sm:text-sm text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5">
+          <i data-lucide="landmark" class="w-4 h-4"></i>
+          <span>Accounts</span>
+        </button>
+        <button data-tab="transactions" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-xs sm:text-sm text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5">
+          <i data-lucide="arrow-left-right" class="w-4 h-4"></i>
+          <span>Transactions</span>
+        </button>
+        <button data-tab="debts" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-xs sm:text-sm text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5">
+          <i data-lucide="hand-coins" class="w-4 h-4"></i>
+          <span>Debts</span>
+        </button>
+        <button data-tab="split" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-xs sm:text-sm text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5">
+          <i data-lucide="users" class="w-4 h-4"></i>
+          <span>Split Bill</span>
+        </button>
+        <button data-tab="settings" class="flex-shrink-0 px-3.5 py-2 rounded-xl text-xs sm:text-sm text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+
+    <!-- TAB 1: DASHBOARD VIEW -->
+    <div id="view-dashboard" class="tab-view space-y-6">
+      
+      <!-- Top 4 Financial Metric Cards -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
+        
+        <!-- Total Net Worth -->
+        <div class="glass-panel glass-panel-hover p-4 sm:p-5 rounded-2xl relative">
+          <div class="flex items-center justify-between text-slate-400">
+            <span class="text-xs font-semibold uppercase tracking-wider text-slate-300">Net Worth</span>
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+              <i data-lucide="trending-up" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <p id="dash-networth" class="mono-num text-xl sm:text-2xl lg:text-3xl font-extrabold text-white mt-2">₹0.00</p>
+          <p class="text-[11px] text-slate-400 mt-1 flex items-center space-x-1">
+            <span>Total Wealth (Assets − Debts)</span>
+          </p>
+        </div>
+
+        <!-- Liquid Cash Available -->
+        <div class="glass-panel glass-panel-hover p-4 sm:p-5 rounded-2xl border-emerald-500/30 liquid-glow relative overflow-hidden">
+          <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none"></div>
+          <div class="flex items-center justify-between text-slate-400">
+            <span class="text-xs font-semibold uppercase tracking-wider text-emerald-400 flex items-center">
+              <span>💧 Liquid Money</span>
+            </span>
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center">
+              <i data-lucide="droplet" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <p id="dash-liquid" class="mono-num text-xl sm:text-2xl lg:text-3xl font-extrabold text-emerald-400 mt-2">₹0.00</p>
+          <p class="text-[11px] text-emerald-300/80 mt-1">Instant Spendable Cash & Bank</p>
+        </div>
+
+        <!-- Receivables / Debts Owed to Me -->
+        <div class="glass-panel glass-panel-hover p-4 sm:p-5 rounded-2xl cursor-pointer" onclick="app.switchTab('debts')">
+          <div class="flex items-center justify-between text-slate-400">
+            <span class="text-xs font-semibold uppercase tracking-wider text-teal-300">To Get Back</span>
+            <div class="w-8 h-8 rounded-lg bg-teal-500/15 text-teal-400 flex items-center justify-center">
+              <i data-lucide="hand-coins" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <p id="dash-owed-to-me" class="mono-num text-xl sm:text-2xl lg:text-3xl font-extrabold text-teal-400 mt-2">₹0.00</p>
+          <p class="text-[11px] text-slate-400 mt-1">Money others owe you</p>
+        </div>
+
+        <!-- Payables / Debts I Owe -->
+        <div class="glass-panel glass-panel-hover p-4 sm:p-5 rounded-2xl cursor-pointer" onclick="app.switchTab('debts')">
+          <div class="flex items-center justify-between text-slate-400">
+            <span class="text-xs font-semibold uppercase tracking-wider text-rose-300">To Pay Out</span>
+            <div class="w-8 h-8 rounded-lg bg-rose-500/15 text-rose-400 flex items-center justify-center">
+              <i data-lucide="receipt" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <p id="dash-i-owe" class="mono-num text-xl sm:text-2xl lg:text-3xl font-extrabold text-rose-400 mt-2">₹0.00</p>
+          <p class="text-[11px] text-slate-400 mt-1">Money you borrowed</p>
+        </div>
+
+      </div>
+
+      <!-- Quick Action Buttons Below Overview Cards -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+        <button onclick="app.openAddTransactionModal('EXPENSE')" class="p-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 flex items-center justify-center space-x-2 text-rose-400 font-semibold text-xs sm:text-sm transition">
+          <i data-lucide="minus-circle" class="w-4 h-4"></i>
+          <span>Log Expense</span>
+        </button>
+        <button onclick="app.openAddTransactionModal('INCOME')" class="p-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 flex items-center justify-center space-x-2 text-emerald-400 font-semibold text-xs sm:text-sm transition">
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+          <span>Log Income</span>
+        </button>
+        <button onclick="app.openAddTransactionModal('TRANSFER')" class="p-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 flex items-center justify-center space-x-2 text-blue-400 font-semibold text-xs sm:text-sm transition">
+          <i data-lucide="repeat" class="w-4 h-4"></i>
+          <span>Transfer</span>
+        </button>
+        <button onclick="app.openAddDebtModal('OWED_TO_ME')" class="p-3 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 flex items-center justify-center space-x-2 text-indigo-400 font-semibold text-xs sm:text-sm transition">
+          <i data-lucide="hand-coins" class="w-4 h-4"></i>
+          <span>Record Debt</span>
+        </button>
+      </div>
+
+      <!-- Monthly Summary & Visual Chart Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Left 2-Cols: Monthly Flow & Expense Chart -->
+        <div class="lg:col-span-2 space-y-6">
+          
+          <!-- Month Flow Banner -->
+          <div class="glass-panel p-5 rounded-2xl">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-bold text-base text-slate-100 flex items-center space-x-2">
+                <i data-lucide="calendar" class="w-4 h-4 text-emerald-400"></i>
+                <span>This Month's Cash Flow</span>
+              </h3>
+              <span class="text-xs text-slate-400">Current Cycle</span>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-4">
+              <div class="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                <span class="text-xs text-emerald-300 font-medium">Total Income</span>
+                <p id="dash-month-income" class="mono-num text-xl sm:text-2xl font-bold text-emerald-400 mt-1">₹0.00</p>
+              </div>
+              <div class="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                <span class="text-xs text-rose-300 font-medium">Total Expenses</span>
+                <p id="dash-month-expense" class="mono-num text-xl sm:text-2xl font-bold text-rose-400 mt-1">₹0.00</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Expense Distribution Chart -->
+          <div class="glass-panel p-5 rounded-2xl">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-bold text-base text-slate-100 flex items-center space-x-2">
+                <i data-lucide="pie-chart" class="w-4 h-4 text-emerald-400"></i>
+                <span>Expenses by Category</span>
+              </h3>
+              <span class="text-xs text-slate-400">Real-time</span>
+            </div>
+            <div class="h-64 relative flex items-center justify-center">
+              <canvas id="expenseChart"></canvas>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Right 1-Col: Accounts & Recent Transactions -->
+        <div class="space-y-6">
+          
+          <!-- Quick Accounts List -->
+          <div class="glass-panel p-5 rounded-2xl">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-bold text-sm text-slate-200 uppercase tracking-wider">Your Accounts</h3>
+              <button onclick="app.switchTab('accounts')" class="text-xs text-emerald-400 hover:underline">Manage</button>
+            </div>
+            <div id="dash-quick-accounts" class="space-y-2">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Recent Transactions -->
+          <div class="glass-panel p-5 rounded-2xl">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-bold text-sm text-slate-200 uppercase tracking-wider">Recent Activity</h3>
+              <button onclick="app.switchTab('transactions')" class="text-xs text-emerald-400 hover:underline">View All</button>
+            </div>
+            <div id="dash-recent-transactions" class="space-y-2">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- TAB 2: ACCOUNTS VIEW -->
+    <div id="view-accounts" class="tab-view hidden space-y-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-extrabold text-white">Accounts & Liquid Assets</h2>
+          <p class="text-sm text-slate-400">Manage bank accounts, physical cash, digital wallets, and credit liabilities.</p>
+        </div>
+        <button onclick="app.openAddAccountModal()" class="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm flex items-center space-x-2 shadow-lg shadow-emerald-500/20 transition">
+          <i data-lucide="plus" class="w-4 h-4 stroke-[3]"></i>
+          <span>Add Account</span>
+        </button>
+      </div>
+
+      <!-- Accounts Grid -->
+      <div id="accounts-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Dynamically rendered -->
+      </div>
+    </div>
+
+    <!-- TAB 3: TRANSACTIONS VIEW -->
+    <div id="view-transactions" class="tab-view hidden space-y-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-extrabold text-white">Transactions Ledger</h2>
+          <p class="text-sm text-slate-400">Filter, search, and audit all recorded cash movements.</p>
+        </div>
+        <button onclick="app.openAddTransactionModal('EXPENSE')" class="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm flex items-center space-x-2 shadow-lg shadow-emerald-500/20 transition">
+          <i data-lucide="plus" class="w-4 h-4 stroke-[3]"></i>
+          <span>Add Transaction</span>
+        </button>
+      </div>
+
+      <!-- Filters & Search Bar -->
+      <div class="glass-panel p-4 rounded-2xl flex flex-col sm:flex-row items-center gap-3">
+        <div class="relative w-full sm:w-72">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
+          <input type="text" id="tx-search-input" oninput="app.renderTransactionsView()" placeholder="Search notes or category..." class="w-full bg-slate-800/90 border border-slate-700/80 rounded-xl pl-9 pr-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div class="flex items-center space-x-2 w-full sm:w-auto">
+          <select id="tx-filter-type" onchange="app.renderTransactionsView()" class="w-full sm:w-auto bg-slate-800/90 border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500">
+            <option value="ALL">All Types</option>
+            <option value="EXPENSE">Expenses Only</option>
+            <option value="INCOME">Income Only</option>
+            <option value="TRANSFER">Transfers Only</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Transactions List -->
+      <div id="transactions-full-list" class="space-y-2.5">
+        <!-- Dynamically rendered -->
+      </div>
+    </div>
+
+    <!-- TAB 4: DEBTS & LOANS VIEW -->
+    <div id="view-debts" class="tab-view hidden space-y-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-extrabold text-white">Debt & Loan Ledger</h2>
+          <p class="text-sm text-slate-400">Keep exact track of money you have to give and money you have to get back.</p>
+        </div>
+        <button onclick="app.openAddDebtModal('OWED_TO_ME')" class="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm flex items-center space-x-2 shadow-lg shadow-emerald-500/20 transition">
+          <i data-lucide="plus" class="w-4 h-4 stroke-[3]"></i>
+          <span>Record New Debt</span>
+        </button>
+      </div>
+
+      <!-- Two-Column Grid: Owed to Me vs I Owe -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        <!-- Owed to Me (Receivables) -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl">
+            <div class="flex items-center space-x-2.5">
+              <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <i data-lucide="arrow-down-left" class="w-4 h-4"></i>
+              </div>
+              <h3 class="font-bold text-emerald-400">Owed to Me (Money to Get)</h3>
+            </div>
+            <button onclick="app.openAddDebtModal('OWED_TO_ME')" class="text-xs text-emerald-400 hover:underline font-semibold">+ Add Lent</button>
+          </div>
+          <div id="debts-owed-to-me" class="space-y-3">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- I Owe (Payables) -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-2xl">
+            <div class="flex items-center space-x-2.5">
+              <div class="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center">
+                <i data-lucide="arrow-up-right" class="w-4 h-4"></i>
+              </div>
+              <h3 class="font-bold text-rose-400">I Owe (Money to Give)</h3>
+            </div>
+            <button onclick="app.openAddDebtModal('I_OWE')" class="text-xs text-rose-400 hover:underline font-semibold">+ Add Borrowed</button>
+          </div>
+          <div id="debts-i-owe" class="space-y-3">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB 5: GROUP SPLIT VIEW -->
+    <div id="view-split" class="tab-view hidden space-y-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-extrabold text-white">Group Bill Splitting</h2>
+          <p class="text-sm text-slate-400">Split shared expenses (dinners, trips, rent) with automatic debt & personal debit logging.</p>
+        </div>
+        <div class="flex items-center space-x-2.5">
+          <button onclick="app.openAddMemberModal()" class="py-2 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center space-x-1.5 transition">
+            <i data-lucide="user-plus" class="w-4 h-4 text-indigo-400"></i>
+            <span>Add Friend</span>
+          </button>
+          <button onclick="app.openAddSplitModal()" class="py-2 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-bold text-xs sm:text-sm flex items-center space-x-2 shadow-lg shadow-indigo-500/25 transition">
+            <i data-lucide="plus" class="w-4 h-4 stroke-[3]"></i>
+            <span>Record New Split</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Group Header Bar -->
+      <div class="glass-panel p-4 rounded-2xl flex items-center justify-between border-indigo-500/30">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <i data-lucide="users" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-sm text-white">Friends & Roommates Group</h3>
+            <p class="text-xs text-slate-400">All member balances auto-adjust in your Debt ledger</p>
+          </div>
+        </div>
+        <span id="split-members-count" class="text-xs font-bold text-indigo-300 bg-indigo-500/20 border border-indigo-500/30 px-3 py-1 rounded-full">
+          5 Members
+        </span>
+      </div>
+
+      <!-- Splits History List -->
+      <div id="splits-history-list" class="space-y-4">
+        <!-- Dynamically rendered -->
+      </div>
+    </div>
+
+    <!-- TAB 6: SETTINGS VIEW -->
+    <div id="view-settings" class="tab-view hidden space-y-6">
+      <div>
+        <h2 class="text-2xl font-extrabold text-white">Preferences & Cloud Sync</h2>
+        <p class="text-sm text-slate-400">Customize your currency, Google account sign-in, and export data.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- Preferences -->
+        <div class="glass-panel p-5 rounded-2xl space-y-4">
+          <h3 class="font-bold text-base text-slate-100 flex items-center space-x-2">
+            <i data-lucide="sliders" class="w-4 h-4 text-emerald-400"></i>
+            <span>Display Preferences</span>
+          </h3>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Currency Symbol</label>
+            <select id="setting-currency" onchange="app.changeCurrency(this.value)" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+              <option value="₹" selected>Indian Rupee (₹)</option>
+              <option value="$">US Dollar ($)</option>
+              <option value="€">Euro (€)</option>
+              <option value="£">British Pound (£)</option>
+              <option value="¥">Japanese Yen (¥)</option>
+              <option value="A$">Australian Dollar (A$)</option>
+              <option value="C$">Canadian Dollar (C$)</option>
+              <option value="AED ">UAE Dirham (AED)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Google Firebase Cloud Sync (Phase 2) -->
+        <div class="glass-panel p-5 rounded-2xl space-y-4 border-indigo-500/30">
+          <div class="flex items-center justify-between">
+            <h3 class="font-bold text-base text-slate-100 flex items-center space-x-2">
+              <svg class="w-4 h-4 text-indigo-400" viewBox="0 0 24 24"><path fill="currentColor" d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z"/></svg>
+              <span>Google Account & Cloud Sync</span>
+            </h3>
+            <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded font-bold border border-emerald-500/20">Firebase Active</span>
+          </div>
+
+          <div id="firebase-auth-status" class="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/60">
+            <!-- Dynamically populated with user photo, name, email & Sign Out button -->
+          </div>
+
+          <div class="p-3 rounded-xl bg-indigo-950/30 border border-indigo-500/20 text-xs text-slate-300 space-y-1">
+            <p class="font-semibold text-indigo-300">✓ Connected to Firebase Project: <span class="font-mono text-emerald-400">finflow-f314f</span></p>
+            <p class="text-[11px] text-slate-400">Your accounts, transactions, debts, and group splits are automatically backed up to Cloud Firestore in real time.</p>
+          </div>
+        </div>
+
+        <!-- Data Management -->
+        <div class="glass-panel p-5 rounded-2xl space-y-4 md:col-span-2">
+          <h3 class="font-bold text-base text-slate-100 flex items-center space-x-2">
+            <i data-lucide="database" class="w-4 h-4 text-emerald-400"></i>
+            <span>Data Management & Backup</span>
+          </h3>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button onclick="app.exportBackup()" class="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center space-x-2 border border-slate-700 transition">
+              <i data-lucide="download" class="w-4 h-4 text-emerald-400"></i>
+              <span>Export All Data (JSON)</span>
+            </button>
+            
+            <label class="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center space-x-2 border border-slate-700 cursor-pointer transition">
+              <i data-lucide="upload" class="w-4 h-4 text-indigo-400"></i>
+              <span>Restore from Backup (JSON)</span>
+              <input type="file" accept=".json" onchange="app.importBackup(event)" class="hidden">
+            </label>
+
+            <button onclick="app.resetDemoData()" class="py-2.5 px-4 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 font-semibold text-xs flex items-center justify-center space-x-2 border border-rose-500/20 transition">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+              <span>Clear All Data (Clean Slate)</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <!-- MOBILE BOTTOM NAVIGATION BAR -->
+  <nav class="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0F172A]/95 backdrop-blur-lg border-t border-slate-800 flex justify-around items-center py-2 px-2 mobile-bottom-bar">
+    <button data-tab="dashboard" class="flex flex-col items-center py-1 px-3 text-emerald-400">
+      <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-1 font-medium">Dashboard</span>
+    </button>
+    <button data-tab="accounts" class="flex flex-col items-center py-1 px-3 text-slate-400">
+      <i data-lucide="landmark" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-1 font-medium">Accounts</span>
+    </button>
+    <button onclick="app.openAddTransactionModal('EXPENSE')" class="w-12 h-12 -mt-5 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+      <i data-lucide="plus" class="w-6 h-6 stroke-[3]"></i>
+    </button>
+    <button data-tab="debts" class="flex flex-col items-center py-1 px-3 text-slate-400">
+      <i data-lucide="hand-coins" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-1 font-medium">Debts</span>
+    </button>
+    <button data-tab="split" class="flex flex-col items-center py-1 px-3 text-slate-400">
+      <i data-lucide="users" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-1 font-medium">Split</span>
+    </button>
+  </nav>
+
+  <!-- ================= MODALS ================= -->
+
+  <!-- MODAL: ADD TRANSACTION -->
+  <div id="modal-transaction" class="modal-backdrop fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel modal-enter w-full max-w-md rounded-2xl p-6 border border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h3 class="font-bold text-lg text-white flex items-center space-x-2">
+          <i data-lucide="plus-circle" class="w-5 h-5 text-emerald-400"></i>
+          <span>Record Transaction</span>
+        </h3>
+        <button onclick="app.closeAllModals()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.saveTransactionFromForm(event)" class="mt-4 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Type</label>
+          <select id="tx-type" onchange="app.updateCategoryOptions(this.value); app.toggleTransferField(this.value === 'TRANSFER');" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+            <option value="EXPENSE">Expense (Money Out)</option>
+            <option value="INCOME">Income / Credit (Money In)</option>
+            <option value="TRANSFER">Transfer between Accounts</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Amount</label>
+          <input type="number" step="0.01" id="tx-amount" placeholder="0.00" required class="mono-num w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-lg font-bold text-emerald-400 focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Category</label>
+          <select id="tx-category-select" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Account (From)</label>
+          <select id="tx-account-select" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
+        <div id="tx-to-account-group" class="hidden">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Target Account (To)</label>
+          <select id="tx-to-account-select" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Date</label>
+            <input type="date" id="tx-date" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Notes / Merchant</label>
+            <input type="text" id="tx-notes" placeholder="e.g. Starbucks, Gas" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200">
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 flex space-x-3">
+          <button type="button" onclick="app.closeAllModals()" class="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 font-semibold text-sm">Cancel</button>
+          <button type="submit" class="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-500/20">Save Transaction</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD ACCOUNT -->
+  <div id="modal-account" class="modal-backdrop fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel modal-enter w-full max-w-md rounded-2xl p-6 border border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h3 class="font-bold text-lg text-white flex items-center space-x-2">
+          <i data-lucide="landmark" class="w-5 h-5 text-emerald-400"></i>
+          <span>Add New Account</span>
+        </h3>
+        <button onclick="app.closeAllModals()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.saveAccountFromForm(event)" class="mt-4 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Account Name</label>
+          <input type="text" id="acc-name" placeholder="e.g. Chase Checking, Physical Wallet" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Account Type</label>
+          <select id="acc-type" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+            <option value="BANK">Bank Account (Savings / Checking)</option>
+            <option value="CASH">Physical Cash / Pocket Cash</option>
+            <option value="WALLET">Digital Wallet (Apple Pay, UPI, PayPal)</option>
+            <option value="CREDIT_CARD">Credit Card (Liability)</option>
+            <option value="INVESTMENT">Investment / Mutual Fund</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Current Balance</label>
+          <input type="number" step="0.01" id="acc-balance" placeholder="0.00" class="mono-num w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-base font-bold text-slate-100">
+        </div>
+
+        <div class="flex items-center space-x-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+          <input type="checkbox" id="acc-is-liquid" checked class="w-4 h-4 text-emerald-500 rounded bg-slate-800 border-slate-700">
+          <div>
+            <label for="acc-is-liquid" class="text-xs font-bold text-emerald-300 cursor-pointer">Count as Liquid Money</label>
+            <p class="text-[11px] text-slate-400">Readily available cash you can spend right now</p>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 flex space-x-3">
+          <button type="button" onclick="app.closeAllModals()" class="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 font-semibold text-sm">Cancel</button>
+          <button type="submit" class="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-500/20">Create Account</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD DEBT -->
+  <div id="modal-debt" class="modal-backdrop fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel modal-enter w-full max-w-md rounded-2xl p-6 border border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h3 class="font-bold text-lg text-white flex items-center space-x-2">
+          <i data-lucide="hand-coins" class="w-5 h-5 text-emerald-400"></i>
+          <span>Record Debt or Loan</span>
+        </h3>
+        <button onclick="app.closeAllModals()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.saveDebtFromForm(event)" class="mt-4 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Direction</label>
+          <select id="debt-direction" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+            <option value="OWED_TO_ME">Owed to Me (I Lent Money - To Get Back)</option>
+            <option value="I_OWE">I Owe (I Borrowed Money - To Give)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Person's Name</label>
+          <input type="text" id="debt-person" placeholder="e.g. John Doe" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Total Amount</label>
+          <input type="number" step="0.01" id="debt-amount" placeholder="0.00" required class="mono-num w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-base font-bold text-emerald-400">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Reason / Note</label>
+          <input type="text" id="debt-reason" placeholder="e.g. Concert ticket, emergency loan, dinner bill" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Expected Due Date (Optional)</label>
+          <input type="date" id="debt-due-date" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200">
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 flex space-x-3">
+          <button type="button" onclick="app.closeAllModals()" class="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 font-semibold text-sm">Cancel</button>
+          <button type="submit" class="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-500/20">Save Debt Record</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: SETTLE DEBT -->
+  <div id="modal-settle-debt" class="modal-backdrop fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel modal-enter w-full max-w-md rounded-2xl p-6 border border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h3 class="font-bold text-lg text-white flex items-center space-x-2">
+          <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400"></i>
+          <span>Record Debt Payment</span>
+        </h3>
+        <button onclick="app.closeAllModals()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.recordDebtPayment(event)" class="mt-4 space-y-4">
+        <input type="hidden" id="settle-debt-id">
+
+        <p id="settle-debt-info" class="text-xs text-slate-300 font-medium p-3 bg-slate-800/80 rounded-xl border border-slate-700/60"></p>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Payment Amount</label>
+          <input type="number" step="0.01" id="settle-amount" required class="mono-num w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-lg font-bold text-emerald-400">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Link to Account (Auto-updates balance)</label>
+          <select id="settle-account-select" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 flex space-x-3">
+          <button type="button" onclick="app.closeAllModals()" class="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 font-semibold text-sm">Cancel</button>
+          <button type="submit" class="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-500/20">Confirm Payment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD GROUP SPLIT -->
+  <div id="modal-split" class="modal-backdrop fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 hidden overflow-y-auto">
+    <div class="glass-panel modal-enter w-full max-w-lg rounded-2xl p-6 border border-slate-700 bg-slate-900 shadow-2xl my-8">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h3 class="font-bold text-lg text-white flex items-center space-x-2">
+          <i data-lucide="split" class="w-5 h-5 text-indigo-400"></i>
+          <span>Record New Group Split</span>
+        </h3>
+        <button onclick="app.closeAllModals()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.saveSplitFromForm(event)" class="mt-4 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Split Title / Purpose</label>
+          <input type="text" id="split-title-input" placeholder="e.g. Dinner at Olive Cafe, Goa Villa Rent, Gas" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Total Bill Amount</label>
+            <input type="number" step="0.01" id="split-total-input" oninput="app.recalculateSplitPreview()" placeholder="0.00" required class="mono-num w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-base font-bold text-emerald-400">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Expense Category</label>
+            <select id="split-category-select" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+              <option value="Food & Dining">Food & Dining</option>
+              <option value="Fuel & Commute">Fuel & Commute</option>
+              <option value="Rent & Housing">Rent & Housing</option>
+              <option value="Groceries">Groceries</option>
+              <option value="Entertainment">Entertainment</option>
+              <option value="Shopping">Shopping</option>
+              <option value="Miscellaneous">Miscellaneous</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Who paid the full bill upfront?</label>
+          <select id="split-payer-select" onchange="app.toggleSplitAccountRow(this.value)" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
+        <div id="split-account-row">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Paid From Which Account?</label>
+          <select id="split-account-select" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+            <!-- Dynamically populated -->
+          </select>
+          <p class="text-[11px] text-slate-400 mt-1">Total bill will be deducted from this account, and your share recorded as personal expense.</p>
+        </div>
+
+        <!-- Checkbox Member Selection -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs font-semibold text-slate-300">Select Who Participated in this Bill</label>
+            <span id="split-calc-preview" class="text-xs font-bold text-indigo-400">Enter bill amount</span>
+          </div>
+          <div id="split-members-checklist" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+            <!-- Dynamically populated checkboxes -->
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 flex space-x-3">
+          <button type="button" onclick="app.closeAllModals()" class="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 font-semibold text-sm">Cancel</button>
+          <button type="submit" class="flex-1 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold text-sm shadow-lg shadow-indigo-500/25">Save & Record Split</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD GROUP MEMBER -->
+  <div id="modal-add-member" class="modal-backdrop fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel modal-enter w-full max-w-sm rounded-2xl p-6 border border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h3 class="font-bold text-lg text-white flex items-center space-x-2">
+          <i data-lucide="user-plus" class="w-5 h-5 text-indigo-400"></i>
+          <span>Add Friend / Member</span>
+        </h3>
+        <button onclick="app.closeAllModals()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.saveMemberFromForm(event)" class="mt-4 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Friend's Name</label>
+          <input type="text" id="member-name-input" placeholder="e.g. Rahul Sharma" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Google Email (For invites & cloud splits)</label>
+          <input type="email" id="member-email-input" placeholder="e.g. rahul@gmail.com" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 flex space-x-3">
+          <button type="button" onclick="app.closeAllModals()" class="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 font-semibold text-sm">Cancel</button>
+          <button type="submit" class="flex-1 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-bold text-sm shadow-lg shadow-indigo-500/20">Add Friend</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- FLOATING ACTION BUTTON (ALWAYS VISIBLE & STICKY ON SCROLL) -->
+  <div class="fixed bottom-20 sm:bottom-8 right-5 sm:right-8 z-50">
+    <button onclick="app.openAddTransactionModal('EXPENSE')" 
+      class="w-14 h-14 sm:w-16 sm:h-16 rounded-full sm:rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-400 text-slate-950 flex items-center justify-center shadow-2xl shadow-emerald-500/50 hover:scale-110 active:scale-95 transition-all duration-200 border-2 border-emerald-300/40"
+      title="Add New Transaction (Always Accessible)">
+      <i data-lucide="plus" class="w-8 h-8 stroke-[3]"></i>
+    </button>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
