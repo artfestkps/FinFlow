@@ -32,6 +32,10 @@ const DEFAULT_MEMBERS = [
   { id: 'm_you', name: 'You (Me)', email: 'you@self.app', isSelf: true }
 ];
 
+const DEFAULT_GROUPS = [
+  { id: 'default_group', name: 'Friends & Roommates', members: DEFAULT_MEMBERS }
+];
+
 const DEFAULT_SPLITS = [];
 
 const DEFAULT_DEBTS = [];
@@ -80,6 +84,12 @@ class FinFlowApp {
       try {
         const parsed = JSON.parse(saved);
         if (!parsed.groupMembers) parsed.groupMembers = DEFAULT_MEMBERS;
+        if (!parsed.groups || parsed.groups.length === 0) {
+          parsed.groups = [
+            { id: 'default_group', name: 'Friends & Roommates', members: parsed.groupMembers || DEFAULT_MEMBERS }
+          ];
+        }
+        if (!parsed.activeGroupId) parsed.activeGroupId = parsed.groups[0].id;
         if (!parsed.splits) parsed.splits = DEFAULT_SPLITS;
         if (!parsed.settlements) parsed.settlements = [];
         if (!parsed.debts) parsed.debts = DEFAULT_DEBTS;
@@ -96,6 +106,8 @@ class FinFlowApp {
       accounts: DEFAULT_ACCOUNTS,
       transactions: DEFAULT_TRANSACTIONS,
       debts: DEFAULT_DEBTS,
+      groups: DEFAULT_GROUPS,
+      activeGroupId: 'default_group',
       groupMembers: DEFAULT_MEMBERS,
       splits: DEFAULT_SPLITS,
       settlements: [],
@@ -646,11 +658,35 @@ class FinFlowApp {
     `;
   }
 
+  // Helper: Get currently active group
+  getActiveGroup() {
+    if (!this.data.groups || this.data.groups.length === 0) {
+      this.data.groups = [
+        { id: 'default_group', name: 'Friends & Roommates', members: this.data.groupMembers || DEFAULT_MEMBERS }
+      ];
+    }
+    const grp = this.data.groups.find(g => g.id === this.data.activeGroupId) || this.data.groups[0];
+    this.data.activeGroupId = grp.id;
+    return grp;
+  }
+
+  // Helper: Get members of the current active group
+  getActiveGroupMembers() {
+    const grp = this.getActiveGroup();
+    if (!grp.members || grp.members.length === 0) {
+      const selfMember = this.data.groupMembers?.find(m => m.isSelf) || DEFAULT_MEMBERS[0];
+      grp.members = [selfMember];
+    }
+    return grp.members;
+  }
+
   // --- SPLIT VIEW & NET SETTLEMENT ENGINE ---
   calculateGroupNetBalances() {
-    const members = this.data.groupMembers || [];
-    const splits = this.data.splits || [];
-    const settlements = this.data.settlements || [];
+    const grp = this.getActiveGroup();
+    const members = this.getActiveGroupMembers();
+    // Filter splits for active group
+    const splits = (this.data.splits || []).filter(s => !s.groupId || s.groupId === grp.id);
+    const settlements = (this.data.settlements || []).filter(s => !s.groupId || s.groupId === grp.id);
     const myMember = members.find(m => m.isSelf || (this.currentUser && m.email && m.email.toLowerCase() === this.currentUser.email.toLowerCase())) || members[0];
     const myId = myMember ? myMember.id : 'm_you';
 
@@ -720,16 +756,18 @@ class FinFlowApp {
   }
 
   settleGroupNet(debtorId, creditorId, amount, debtorName) {
-    if (!confirm(`Confirm that ${debtorName} has paid you ${this.formatMoney(amount)}? This will settle their balance in the group.`)) return;
+    const grp = this.getActiveGroup();
+    if (!confirm(`Confirm that ${debtorName} has paid you ${this.formatMoney(amount)}? This will settle their balance in ${grp.name}.`)) return;
 
     const settlementId = 'set_' + Date.now();
     const settlement = {
       id: settlementId,
+      groupId: grp.id,
       fromMemberId: debtorId,   // who paid
       toMemberId: creditorId,   // who received (the payer who clicks this button)
       amount: Number(amount),
       date: new Date().toISOString().split('T')[0],
-      settledByName: (this.data.groupMembers.find(m => m.id === creditorId) || {}).name || 'You',
+      settledByName: (this.getActiveGroupMembers().find(m => m.id === creditorId) || {}).name || 'You',
       createdAt: Date.now()
     };
 
@@ -757,7 +795,7 @@ class FinFlowApp {
     if (this.currentUser && window.firebase) {
       try {
         const db = firebase.firestore();
-        db.collection('shared_groups').doc('default_group').collection('settlements').doc(settlementId).set(settlement)
+        db.collection('shared_groups').doc(grp.id).collection('settlements').doc(settlementId).set(settlement)
           .catch(err => this.handleFirestoreError(err));
       } catch (err) {
         this.handleFirestoreError(err);
@@ -767,28 +805,159 @@ class FinFlowApp {
     this.showToast(`✅ Marked ${debtorName}'s balance as settled! Their app will update automatically.`, 'success');
   }
 
+  // Switch between groups (College Friends, Family, etc.)
+  switchGroup(groupId) {
+    this.data.activeGroupId = groupId;
+    this.saveData();
+    // Re-bind Firestore listeners for the newly selected group
+    this.syncSharedGroupsWithFirestore();
+  }
+
+  // Open modal to create a new group
+  openNewGroupModal() {
+    const modal = document.getElementById('modal-create-group');
+    const input = document.getElementById('new-group-name-input');
+    if (input) input.value = '';
+    if (modal) modal.classList.remove('hidden');
+    if (input) input.focus();
+  }
+
+  // Save new group
+  saveNewGroupFromForm(e) {
+    e.preventDefault();
+    const name = document.getElementById('new-group-name-input')?.value.trim();
+    if (!name) return;
+
+    const selfMember = this.data.groupMembers?.find(m => m.isSelf) || DEFAULT_MEMBERS[0];
+    const groupId = 'grp_' + Date.now();
+    const newGroup = {
+      id: groupId,
+      name: name,
+      members: [selfMember],
+      createdAt: Date.now(),
+      createdBy: this.currentUser?.email || 'local'
+    };
+
+    if (!this.data.groups) this.data.groups = [];
+    this.data.groups.push(newGroup);
+    this.data.activeGroupId = groupId;
+
+    this.saveData();
+    this.closeAllModals();
+
+    // Sync new group metadata to Firestore
+    if (this.currentUser && window.firebase) {
+      try {
+        const db = firebase.firestore();
+        db.collection('shared_groups').doc(groupId).set({
+          id: groupId,
+          name: name,
+          createdAt: Date.now(),
+          createdBy: this.currentUser.email
+        }, { merge: true }).catch(err => this.handleFirestoreError(err));
+
+        // Add self to new group members
+        db.collection('shared_groups').doc(groupId).collection('members').doc(selfMember.id).set(selfMember)
+          .catch(err => this.handleFirestoreError(err));
+      } catch(err) {
+        this.handleFirestoreError(err);
+      }
+    }
+
+    this.syncSharedGroupsWithFirestore();
+    this.showToast(`Group "${name}" created!`, 'success');
+  }
+
+  // Delete current active group
+  deleteCurrentGroup() {
+    if (!this.data.groups || this.data.groups.length <= 1) {
+      alert('You must keep at least one group.');
+      return;
+    }
+    const grp = this.getActiveGroup();
+    if (!confirm(`Delete group "${grp.name}"? Active splits in this group will be cleared.`)) return;
+
+    // Filter out group splits and debts
+    this.data.splits = (this.data.splits || []).filter(s => s.groupId !== grp.id);
+    this.data.groups = this.data.groups.filter(g => g.id !== grp.id);
+    this.data.activeGroupId = this.data.groups[0].id;
+
+    this.saveData();
+    this.syncSharedGroupsWithFirestore();
+    this.showToast(`Group "${grp.name}" removed.`, 'success');
+  }
+
+  // Remove a member from the active group
+  removeMemberFromActiveGroup(memberId) {
+    const grp = this.getActiveGroup();
+    const member = grp.members.find(m => m.id === memberId);
+    if (!member) return;
+
+    if (member.isSelf) {
+      alert('You cannot remove yourself from the group.');
+      return;
+    }
+
+    if (!confirm(`Remove ${member.name} from "${grp.name}"?`)) return;
+
+    grp.members = grp.members.filter(m => m.id !== memberId);
+    this.saveData();
+
+    // Remove from Firestore subcollection for this group
+    if (this.currentUser && window.firebase) {
+      try {
+        const db = firebase.firestore();
+        db.collection('shared_groups').doc(grp.id).collection('members').doc(memberId).delete()
+          .catch(err => this.handleFirestoreError(err));
+      } catch (err) {
+        this.handleFirestoreError(err);
+      }
+    }
+
+    this.render();
+    this.showToast(`Removed ${member.name} from ${grp.name}`, 'success');
+  }
+
   renderSplitView() {
     const list = document.getElementById('splits-history-list');
-    const membersBadge = document.getElementById('split-members-count');
     const chipsContainer = document.getElementById('split-members-chips');
     const netContainer = document.getElementById('split-net-balances-container');
+    const groupSelect = document.getElementById('group-select');
+    const groupTitle = document.getElementById('active-group-title');
+    const membersBadge = document.getElementById('active-group-members-badge');
 
     // Update Firestore rules sync banner
     if (this.firestoreRulesValid !== null) {
       this.renderFirestoreAlert(!this.firestoreRulesValid);
     }
 
-    const members = this.data.groupMembers || [];
+    const grp = this.getActiveGroup();
+    const members = this.getActiveGroupMembers();
+
+    // Update Group Header & Title
+    if (groupTitle) groupTitle.textContent = grp.name;
     if (membersBadge) membersBadge.textContent = `${members.length} Members`;
 
-    // Render member chips preview
+    // Populate Group Dropdown Selector
+    if (groupSelect && this.data.groups) {
+      groupSelect.innerHTML = this.data.groups.map(g => `
+        <option value="${g.id}" ${g.id === grp.id ? 'selected' : ''}>${g.name}</option>
+      `).join('');
+    }
+
+    // Render member chips with delete (x) button
     if (chipsContainer) {
       chipsContainer.innerHTML = members.map(m => `
-        <span class="text-xs px-2.5 py-1 rounded-xl bg-slate-800 text-slate-300 border border-slate-700/70 flex items-center space-x-1.5 font-medium">
+        <div class="text-xs px-2.5 py-1.5 rounded-xl bg-slate-800 text-slate-200 border border-slate-700/80 flex items-center space-x-2 font-medium group">
           <i data-lucide="${m.isSelf ? 'user' : 'user-check'}" class="w-3.5 h-3.5 ${m.isSelf ? 'text-emerald-400' : 'text-indigo-400'}"></i>
-          <span>${m.name} ${m.isSelf ? '(You)' : ''}</span>
+          <span>${m.name} ${m.isSelf ? '<span class="text-emerald-400 font-bold">(You)</span>' : ''}</span>
           ${m.email ? `<span class="text-[10px] text-slate-500 hidden sm:inline">(${m.email})</span>` : ''}
-        </span>
+          ${!m.isSelf ? `
+            <button onclick="app.removeMemberFromActiveGroup('${m.id}')" title="Remove from group" class="text-slate-400 hover:text-rose-400 p-0.5 rounded transition">
+              <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+          ` : ''}
+        </div>
       `).join('');
     }
 
@@ -872,24 +1041,26 @@ class FinFlowApp {
       }
     }
 
-    // Render Split History List
+    // Render Split History List for active group
     if (!list) return;
 
-    if (!this.data.splits || this.data.splits.length === 0) {
+    const groupSplits = (this.data.splits || []).filter(s => !s.groupId || s.groupId === grp.id);
+
+    if (groupSplits.length === 0) {
       list.innerHTML = `
         <div class="p-10 text-center text-slate-500 border border-dashed border-slate-700 rounded-2xl">
           <i data-lucide="receipt" class="w-10 h-10 mx-auto mb-2 opacity-40 text-indigo-400"></i>
-          <p class="text-sm font-semibold text-slate-300">No split transactions recorded yet</p>
-          <p class="text-xs text-slate-500 mt-0.5">Tap the "+ Record New Split" button to split dinner, petrol, or groceries!</p>
+          <p class="text-sm font-semibold text-slate-300">No split transactions recorded in ${grp.name}</p>
+          <p class="text-xs text-slate-500 mt-0.5">Tap the "+ Record New Split" button to split expenses with this group!</p>
         </div>
       `;
       return;
     }
 
-    list.innerHTML = this.data.splits.map(sp => {
+    list.innerHTML = groupSplits.map(sp => {
       const isPaidByMe = sp.paidById === 'm_you' || sp.paidBy.includes('You');
       const includedNames = (sp.includedMemberIds || []).map(id => {
-        const m = this.data.groupMembers.find(mem => mem.id === id);
+        const m = members.find(mem => mem.id === id);
         return m ? m.name : id;
       });
 
@@ -1098,9 +1269,11 @@ class FinFlowApp {
     if (totalInput) totalInput.value = '';
     if (titleInput) titleInput.value = '';
 
-    // Populate Payers
+    const members = this.getActiveGroupMembers();
+
+    // Populate Payers from active group
     if (payerSelect) {
-      payerSelect.innerHTML = this.data.groupMembers.map(m => 
+      payerSelect.innerHTML = members.map(m => 
         `<option value="${m.id}">${m.name} ${m.isSelf ? '(You)' : ''}</option>`
       ).join('');
       payerSelect.value = 'm_you';
@@ -1113,9 +1286,9 @@ class FinFlowApp {
       ).join('');
     }
 
-    // Populate Member Checkboxes
+    // Populate Member Checkboxes for active group
     if (membersContainer) {
-      membersContainer.innerHTML = this.data.groupMembers.map(m => `
+      membersContainer.innerHTML = members.map(m => `
         <label class="flex items-center justify-between p-2.5 rounded-xl bg-slate-800/80 border border-slate-700 hover:border-indigo-500/40 cursor-pointer transition">
           <div class="flex items-center space-x-2.5">
             <input type="checkbox" name="split-member" value="${m.id}" checked onchange="app.recalculateSplitPreview()" class="w-4 h-4 text-emerald-500 rounded bg-slate-900 border-slate-700">
@@ -1175,10 +1348,13 @@ class FinFlowApp {
       return;
     }
 
+    const grp = this.getActiveGroup();
+    const members = this.getActiveGroupMembers();
+
     const perPersonShare = Number((totalAmount / includedMemberIds.length).toFixed(2));
     const isPayerYou = (payerId === 'm_you');
     const isYouIncluded = includedMemberIds.includes('m_you');
-    const payerMember = this.data.groupMembers.find(m => m.id === payerId) || { name: 'Unknown' };
+    const payerMember = members.find(m => m.id === payerId) || { name: 'Unknown' };
 
     const splitId = 'split_' + Date.now();
 
@@ -1200,7 +1376,7 @@ class FinFlowApp {
           accountId: accountId,
           splitId: splitId,
           isSplit: true,
-          notes: `Split Share: ${title}`,
+          notes: `Split Share (${grp.name}): ${title}`,
           date: new Date().toISOString().split('T')[0],
           createdAt: Date.now()
         });
@@ -1209,7 +1385,7 @@ class FinFlowApp {
       // 2. Automatically create DEBTS under "Owed to Me (Money to Get)" for each other friend!
       includedMemberIds.forEach(memId => {
         if (memId !== 'm_you') {
-          const friend = this.data.groupMembers.find(m => m.id === memId);
+          const friend = members.find(m => m.id === memId);
           this.data.debts.unshift({
             id: 'debt_split_' + Date.now() + '_' + memId,
             direction: 'OWED_TO_ME',
@@ -1220,6 +1396,7 @@ class FinFlowApp {
             remainingAmount: perPersonShare,
             reason: `Split: ${title}`,
             splitId: splitId,
+            groupId: grp.id,
             isSplit: true,
             paidById: 'm_you',
             canSettleByPayer: true, // Only YOU (the person who paid) can mark settled!
@@ -1243,6 +1420,7 @@ class FinFlowApp {
           remainingAmount: perPersonShare,
           reason: `Split: ${title}`,
           splitId: splitId,
+          groupId: grp.id,
           isSplit: true,
           paidById: payerId,
           canSettleByPayer: false,
@@ -1256,6 +1434,7 @@ class FinFlowApp {
     // Save Split record
     const newSplit = {
       id: splitId,
+      groupId: grp.id,
       title,
       totalAmount,
       paidBy: payerMember.name,
@@ -1275,11 +1454,11 @@ class FinFlowApp {
     this.data.splits.unshift(newSplit);
     this.saveData();
 
-    // Write directly to shared splits subcollection for instant cross-device sync!
+    // Write directly to shared splits subcollection for this active group!
     if (this.currentUser && window.firebase) {
       try {
         const db = firebase.firestore();
-        db.collection('shared_groups').doc('default_group').collection('splits').doc(splitId).set(newSplit)
+        db.collection('shared_groups').doc(grp.id).collection('splits').doc(splitId).set(newSplit)
           .catch(err => this.handleFirestoreError(err));
       } catch (err) {
         this.handleFirestoreError(err);
@@ -1287,13 +1466,15 @@ class FinFlowApp {
     }
 
     this.closeAllModals();
-    this.showToast(`Split "${title}" recorded! Debts and accounts updated ✓`, 'success');
+    this.showToast(`Split "${title}" recorded in ${grp.name}!`, 'success');
   }
 
   deleteSplit(splitId) {
     const sp = this.data.splits.find(s => s.id === splitId);
     if (!sp) return;
     if (!confirm(`Delete split "${sp.title}"?\n\nThis will cancel all related debts, remove the expense log, and refund ${this.formatMoney(sp.totalAmount)} back to your account.`)) return;
+
+    const groupId = sp.groupId || this.getActiveGroup().id;
 
     // 1. If YOU paid the split, refund the full totalAmount back to the payer account!
     if (sp.payerAccountId) {
@@ -1318,7 +1499,7 @@ class FinFlowApp {
     if (this.currentUser && window.firebase) {
       try {
         const db = firebase.firestore();
-        db.collection('shared_groups').doc('default_group').collection('splits').doc(splitId).delete()
+        db.collection('shared_groups').doc(groupId).collection('splits').doc(splitId).delete()
           .catch(err => this.handleFirestoreError(err));
       } catch (err) {
         this.handleFirestoreError(err);
@@ -1344,6 +1525,7 @@ class FinFlowApp {
       return;
     }
 
+    const grp = this.getActiveGroup();
     const memberId = 'm_' + Date.now();
     const newMember = {
       id: memberId,
@@ -1353,14 +1535,23 @@ class FinFlowApp {
       addedAt: Date.now()
     };
 
-    this.data.groupMembers.push(newMember);
+    // Add to active group members
+    if (!grp.members) grp.members = [];
+    grp.members.push(newMember);
+
+    // Also add to global groupMembers if not already present
+    if (!this.data.groupMembers) this.data.groupMembers = [];
+    if (!this.data.groupMembers.some(m => m.id === memberId || (m.email && m.email === email))) {
+      this.data.groupMembers.push(newMember);
+    }
+
     this.saveData();
 
-    // Direct write to shared members subcollection so all connected friends get it immediately!
+    // Direct write to shared members subcollection for this active group!
     if (this.currentUser && window.firebase) {
       try {
         const db = firebase.firestore();
-        db.collection('shared_groups').doc('default_group').collection('members').doc(memberId).set(newMember)
+        db.collection('shared_groups').doc(grp.id).collection('members').doc(memberId).set(newMember)
           .catch(err => this.handleFirestoreError(err));
       } catch (err) {
         this.handleFirestoreError(err);
@@ -1368,7 +1559,7 @@ class FinFlowApp {
     }
 
     this.closeAllModals();
-    this.showToast(`Added ${name} to group friends!`, 'success');
+    this.showToast(`Added ${name} to "${grp.name}"!`, 'success');
   }
 
   // 4. ACCOUNTS LOGIC
@@ -1831,9 +2022,11 @@ class FinFlowApp {
 
     const myEmail = (this.currentUser.email || '').toLowerCase();
     const myUid = this.currentUser.uid;
-    const myName = this.currentUser.displayName || this.data.groupMembers.find(m => m.isSelf)?.name || 'Me';
+    const myName = this.currentUser.displayName || 'Me';
+    const activeGrp = this.getActiveGroup();
+    const activeGroupId = activeGrp.id;
 
-    // ── 1. Register my Google user in the shared group members ──────────────
+    // ── 1. Register my Google user in the active shared group members ────────
     const myProfile = {
       id: myUid,
       name: myName,
@@ -1841,21 +2034,32 @@ class FinFlowApp {
       isSelf: false,
       updatedAt: Date.now()
     };
-    db.collection('shared_groups').doc('default_group').collection('members').doc(myUid).set(myProfile, { merge: true })
+
+    // Save group meta
+    db.collection('shared_groups').doc(activeGroupId).set({
+      id: activeGroupId,
+      name: activeGrp.name,
+      lastActive: Date.now()
+    }, { merge: true }).catch(err => this.handleFirestoreError(err));
+
+    db.collection('shared_groups').doc(activeGroupId).collection('members').doc(myUid).set(myProfile, { merge: true })
       .catch(err => this.handleFirestoreError(err));
 
-    // ── 2. Real-time listener for MEMBERS ──────────────────────────────────
-    db.collection('shared_groups').doc('default_group').collection('members').onSnapshot(snapshot => {
+    // ── 2. Real-time listener for ACTIVE GROUP MEMBERS ─────────────────────
+    db.collection('shared_groups').doc(activeGroupId).collection('members').onSnapshot(snapshot => {
       let changed = false;
+      const grp = this.getActiveGroup();
+      if (!grp.members) grp.members = [];
+
       snapshot.forEach(doc => {
         const m = doc.data();
         if (!m || !m.email) return;
-        const exists = this.data.groupMembers.find(localM =>
+        const exists = grp.members.find(localM =>
           localM.id === m.id ||
           (localM.email && localM.email.toLowerCase() === m.email.toLowerCase())
         );
         if (!exists) {
-          this.data.groupMembers.push({
+          grp.members.push({
             id: m.id || ('m_' + Date.now()),
             name: m.name || 'Friend',
             email: m.email.toLowerCase(),
@@ -1870,8 +2074,8 @@ class FinFlowApp {
       }
     }, err => this.handleFirestoreError(err));
 
-    // ── 3. Real-time listener for SPLITS ───────────────────────────────────
-    db.collection('shared_groups').doc('default_group').collection('splits').onSnapshot(snapshot => {
+    // ── 3. Real-time listener for ACTIVE GROUP SPLITS ──────────────────────
+    db.collection('shared_groups').doc(activeGroupId).collection('splits').onSnapshot(snapshot => {
       let changed = false;
       const remoteSplits = [];
       const remoteIds = new Set();
@@ -1879,6 +2083,7 @@ class FinFlowApp {
       snapshot.forEach(doc => {
         const sp = doc.data();
         if (sp && sp.id) {
+          sp.groupId = activeGroupId;
           remoteSplits.push(sp);
           remoteIds.add(sp.id);
         }
@@ -1887,19 +2092,23 @@ class FinFlowApp {
       // Newest first
       remoteSplits.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-      if (JSON.stringify(remoteSplits) !== JSON.stringify(this.data.splits)) {
-        // Handle remotely deleted splits: remove corresponding debts and transactions!
-        const deletedSplits = (this.data.splits || []).filter(s => !remoteIds.has(s.id));
+      // Splits for this group in local storage
+      const currentGroupSplits = (this.data.splits || []).filter(s => s.groupId === activeGroupId);
+
+      if (JSON.stringify(remoteSplits) !== JSON.stringify(currentGroupSplits)) {
+        // Handle remotely deleted splits in this group: remove debts & tx
+        const deletedSplits = currentGroupSplits.filter(s => !remoteIds.has(s.id));
         deletedSplits.forEach(delSp => {
           this.data.debts = this.data.debts.filter(d => d.splitId !== delSp.id);
           this.data.transactions = this.data.transactions.filter(t => t.splitId !== delSp.id);
         });
 
         // Detect brand-new splits to auto-create matching Debts
-        const localIds = new Set((this.data.splits || []).map(s => s.id));
+        const localIds = new Set(currentGroupSplits.map(s => s.id));
         const newSplits = remoteSplits.filter(s => !localIds.has(s.id));
 
-        const meMember = this.data.groupMembers.find(m =>
+        const members = this.getActiveGroupMembers();
+        const meMember = members.find(m =>
           m.isSelf || (m.email && m.email.toLowerCase() === myEmail)
         );
         const myId = meMember ? meMember.id : 'm_you';
@@ -1936,6 +2145,7 @@ class FinFlowApp {
                 remainingAmount: share,
                 reason: `Split: ${sp.title}`,
                 splitId: splitId,
+                groupId: activeGroupId,
                 isSplit: true,
                 paidById: payerId,
                 canSettleByPayer: false,
@@ -1948,7 +2158,7 @@ class FinFlowApp {
             // Friends owe me
             included.forEach(memId => {
               if (memId !== myId && memId !== 'm_you' && memId !== myUid) {
-                const mem = this.data.groupMembers.find(m => m.id === memId);
+                const mem = members.find(m => m.id === memId);
                 const memName = mem ? mem.name : 'Friend';
                 if (!debtAlreadyExists(memId)) {
                   this.data.debts.unshift({
@@ -1961,6 +2171,7 @@ class FinFlowApp {
                     remainingAmount: share,
                     reason: `Split: ${sp.title}`,
                     splitId: splitId,
+                    groupId: activeGroupId,
                     isSplit: true,
                     paidById: myId,
                     canSettleByPayer: true,
@@ -1974,7 +2185,9 @@ class FinFlowApp {
           }
         });
 
-        this.data.splits = remoteSplits;
+        // Merge: keep splits from other groups, replace current group's splits
+        const otherGroupSplits = (this.data.splits || []).filter(s => s.groupId && s.groupId !== activeGroupId);
+        this.data.splits = [...remoteSplits, ...otherGroupSplits];
         changed = true;
       }
 
@@ -1984,19 +2197,24 @@ class FinFlowApp {
       }
     }, err => this.handleFirestoreError(err));
 
-    // ── 4. Real-time listener for SETTLEMENTS ──────────────────────────────
-    db.collection('shared_groups').doc('default_group').collection('settlements').onSnapshot(snapshot => {
+    // ── 4. Real-time listener for ACTIVE GROUP SETTLEMENTS ──────────────────
+    db.collection('shared_groups').doc(activeGroupId).collection('settlements').onSnapshot(snapshot => {
       let changed = false;
       const remoteSettlements = [];
       snapshot.forEach(doc => {
         const st = doc.data();
-        if (st && st.id) remoteSettlements.push(st);
+        if (st && st.id) {
+          st.groupId = activeGroupId;
+          remoteSettlements.push(st);
+        }
       });
 
-      if (JSON.stringify(remoteSettlements) !== JSON.stringify(this.data.settlements || [])) {
+      const currentGroupSettlements = (this.data.settlements || []).filter(s => s.groupId === activeGroupId);
+
+      if (JSON.stringify(remoteSettlements) !== JSON.stringify(currentGroupSettlements)) {
         remoteSettlements.forEach(st => {
           this.data.debts.forEach(d => {
-            if (d.isSplit) {
+            if (d.isSplit && (!d.groupId || d.groupId === activeGroupId)) {
               const isMatch =
                 (d.direction === 'I_OWE' && (d.personId === st.toMemberId || d.personId === 'm_you')) ||
                 (d.direction === 'OWED_TO_ME' && (d.personId === st.fromMemberId));
@@ -2008,7 +2226,8 @@ class FinFlowApp {
             }
           });
         });
-        this.data.settlements = remoteSettlements;
+        const otherGroupSettlements = (this.data.settlements || []).filter(s => s.groupId && s.groupId !== activeGroupId);
+        this.data.settlements = [...remoteSettlements, ...otherGroupSettlements];
         changed = true;
       }
 

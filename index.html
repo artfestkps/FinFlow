@@ -513,26 +513,57 @@ service cloud.firestore {
         <button onclick="app.testFirestoreRules(true)" class="text-[11px] text-emerald-400 hover:underline">Verify Sync</button>
       </div>
 
-      <!-- Group Header & Members Summary -->
-      <div class="glass-panel p-5 rounded-2xl border-indigo-500/30 space-y-3">
-        <div class="flex items-center justify-between">
+      <!-- Group Switcher & Management Bar -->
+      <div class="glass-panel p-4 sm:p-5 rounded-2xl border-indigo-500/30 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
               <i data-lucide="users" class="w-5 h-5"></i>
             </div>
             <div>
-              <h3 class="font-bold text-base text-white">Friends & Roommates Group</h3>
-              <p class="text-xs text-slate-400">Debts automatically cancel out when multiple members pay over time</p>
+              <div class="flex items-center space-x-2">
+                <span class="text-xs text-indigo-300 font-semibold uppercase tracking-wider">Active Group:</span>
+                <span id="active-group-members-badge" class="text-[11px] font-bold text-indigo-300 bg-indigo-500/20 border border-indigo-500/30 px-2 py-0.5 rounded-full">
+                  1 Members
+                </span>
+              </div>
+              <h3 id="active-group-title" class="font-extrabold text-lg text-white">Friends & Roommates</h3>
             </div>
           </div>
-          <span id="split-members-count" class="text-xs font-bold text-indigo-300 bg-indigo-500/20 border border-indigo-500/30 px-3 py-1 rounded-full">
-            1 Members
-          </span>
+
+          <!-- Group Action Buttons -->
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- Group Selector Dropdown -->
+            <select id="group-select" onchange="app.switchGroup(this.value)" class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-200 focus:outline-none focus:border-indigo-500">
+              <!-- Dynamically populated -->
+            </select>
+            <button onclick="app.openNewGroupModal()" class="py-2 px-3 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 font-bold text-xs flex items-center space-x-1.5 transition">
+              <i data-lucide="folder-plus" class="w-3.5 h-3.5"></i>
+              <span>New Group</span>
+            </button>
+            <button onclick="app.deleteCurrentGroup()" class="py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700 font-semibold text-xs transition" title="Delete current group">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
         </div>
 
-        <!-- Members pills preview -->
-        <div id="split-members-chips" class="flex flex-wrap gap-2 pt-2 border-t border-slate-800">
-          <!-- Rendered dynamically -->
+        <!-- Members Header with Add Friend & Delete Friend Options -->
+        <div class="pt-3 border-t border-slate-800">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+              <i data-lucide="user-check" class="w-3.5 h-3.5 text-emerald-400"></i>
+              <span>Group Members & Friends:</span>
+            </span>
+            <button onclick="app.openAddMemberModal()" class="text-xs text-indigo-400 hover:text-indigo-300 font-bold flex items-center space-x-1 py-1 px-2.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition">
+              <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
+              <span>+ Add Person to Group</span>
+            </button>
+          </div>
+
+          <!-- Member Chips with remove (x) button -->
+          <div id="split-members-chips" class="flex flex-wrap gap-2 pt-1">
+            <!-- Rendered dynamically -->
+          </div>
         </div>
       </div>
 
@@ -977,13 +1008,40 @@ service cloud.firestore {
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-slate-300 mb-1">Google Email (For invites & cloud splits)</label>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Google Email (For cloud splits sync)</label>
           <input type="email" id="member-email-input" placeholder="e.g. rahul@gmail.com" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
         </div>
 
         <div class="pt-3 border-t border-slate-800 flex space-x-3">
           <button type="button" onclick="app.closeAllModals()" class="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 font-semibold text-sm">Cancel</button>
           <button type="submit" class="flex-1 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-bold text-sm shadow-lg shadow-indigo-500/20">Add Friend</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: CREATE NEW GROUP -->
+  <div id="modal-create-group" class="modal-backdrop fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel modal-enter w-full max-w-sm rounded-2xl p-6 border border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h3 class="font-bold text-lg text-white flex items-center space-x-2">
+          <i data-lucide="folder-plus" class="w-5 h-5 text-indigo-400"></i>
+          <span>Create New Group</span>
+        </h3>
+        <button onclick="app.closeAllModals()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.saveNewGroupFromForm(event)" class="mt-4 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Group Name</label>
+          <input type="text" id="new-group-name-input" placeholder="e.g. College Friends, Family, Goa Trip" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 flex space-x-3">
+          <button type="button" onclick="app.closeAllModals()" class="flex-1 py-2 rounded-xl bg-slate-800 text-slate-400 font-semibold text-sm">Cancel</button>
+          <button type="submit" class="flex-1 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-bold text-sm shadow-lg shadow-indigo-500/20">Create Group</button>
         </div>
       </form>
     </div>
