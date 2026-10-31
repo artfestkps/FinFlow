@@ -6,11 +6,9 @@ const ASSETS_TO_CACHE = [
   './manifest.json',
   './app.js',
   './style.css',
-  './public/icons/icon-192.png',
-  './public/icons/icon-512.png',
-  'https://cdn.tailwindcss.com',
-  'https://unpkg.com/lucide@latest',
-  'https://cdn.jsdelivr.net/npm/chart.js'
+  './icon-192.png',
+  './icon-512.png',
+  './logo.svg'
 ];
 
 self.addEventListener('install', (event) => {
