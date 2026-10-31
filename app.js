@@ -1037,23 +1037,35 @@ class FinFlowApp {
   }
 
   deleteTransaction(id) {
-    if (!confirm('Are you sure you want to delete this transaction? (Account balances will be reverted)')) return;
+    if (!confirm('Delete this transaction? The account balance will be fully reversed.')) return;
     const tx = this.data.transactions.find(t => t.id === id);
-    if (tx) {
-      const sourceAcc = this.data.accounts.find(a => a.id === tx.accountId);
-      if (sourceAcc) {
-        const curBal = Number(sourceAcc.balance) || 0;
-        if (tx.type === 'EXPENSE') sourceAcc.balance = curBal + tx.amount;
-        if (tx.type === 'INCOME') sourceAcc.balance = curBal - tx.amount;
-        if (tx.type === 'TRANSFER') {
-          sourceAcc.balance = curBal + tx.amount;
-          const targetAcc = this.data.accounts.find(a => a.id === tx.toAccountId);
-          if (targetAcc) targetAcc.balance = (Number(targetAcc.balance) || 0) - tx.amount;
+    if (!tx) return;
+
+    // ── Reverse the account balance impact ──────────────────────────────────
+    const sourceAcc = this.data.accounts.find(a => a.id === tx.accountId);
+    if (sourceAcc) {
+      const amount = Number(tx.amount) || 0;
+      const curBal = Number(sourceAcc.balance) || 0;
+      if (tx.type === 'EXPENSE') {
+        // Was subtracted → add back
+        sourceAcc.balance = Number((curBal + amount).toFixed(2));
+      } else if (tx.type === 'INCOME') {
+        // Was added → subtract back
+        sourceAcc.balance = Number((curBal - amount).toFixed(2));
+      } else if (tx.type === 'TRANSFER') {
+        // Source lost money → give it back
+        sourceAcc.balance = Number((curBal + amount).toFixed(2));
+        // Destination gained money → take it back
+        const targetAcc = this.data.accounts.find(a => a.id === tx.toAccountId);
+        if (targetAcc) {
+          targetAcc.balance = Number(((Number(targetAcc.balance) || 0) - amount).toFixed(2));
         }
       }
-      this.data.transactions = this.data.transactions.filter(t => t.id !== id);
-      this.saveData();
     }
+
+    this.data.transactions = this.data.transactions.filter(t => t.id !== id);
+    this.saveData();
+    this.showToast('Transaction deleted & account balance reversed ✓', 'success');
   }
 
   // 2. GROUP SPLIT ENGINE
@@ -1634,10 +1646,33 @@ class FinFlowApp {
         } catch(e) {}
       }
 
+      const displayName = customName || result.user.displayName || 'Me';
+      const userEmail   = (result.user.email || '').toLowerCase();
+
+      // Update local self-member record with real Google email + name
       const youMember = this.data.groupMembers.find(m => m.id === 'm_you');
       if (youMember) {
-        youMember.name = customName || result.user.displayName || 'You (Me)';
-        youMember.email = result.user.email || 'you@self.app';
+        youMember.name  = displayName;
+        youMember.email = userEmail;
+        youMember.uid   = result.user.uid;
+      }
+
+      // ── CRITICAL: Register this user's email+uid in the shared group memberMap ──
+      // This allows friends to match this person when syncing splits even if
+      // they were added with a slightly different name.
+      if (window.firebase) {
+        try {
+          const db = firebase.firestore();
+          db.collection('shared_groups').doc('default_group').set({
+            [`memberMap.${result.user.uid}`]: {
+              id: 'm_you',           // their self-member id
+              name: displayName,
+              email: userEmail,
+              uid: result.user.uid,
+              registeredAt: Date.now()
+            }
+          }, { merge: true }).catch(() => {});
+        } catch(e) {}
       }
 
       const authGate = document.getElementById('auth-gate-screen');
@@ -1705,8 +1740,29 @@ class FinFlowApp {
     if (!window.firebase || !this.currentUser) return;
     const db = firebase.firestore();
 
-    // Determine who "I" am in the group by matching signed-in email
-    const myEmail = (this.currentUser.email || '').toLowerCase();
+    // ── Register myself in the shared group members list ─────────────────────
+    // This is critical so other users know who I am when they sync splits.
+    // We write our email + UID + display name to the shared group.
+    const myEmail    = (this.currentUser.email || '').toLowerCase();
+    const myUid      = this.currentUser.uid;
+    const myName     = this.currentUser.displayName || this.data.groupMembers.find(m => m.isSelf)?.name || 'Me';
+
+    // Find my self-member record in local data
+    const selfMember = this.data.groupMembers.find(m => m.isSelf) || this.data.groupMembers.find(m => m.id === 'm_you');
+
+    // Update the shared_group members list to include me with my real email/uid
+    if (myEmail && selfMember) {
+      // Upsert my record into the shared group members so friends can find me by email
+      db.collection('shared_groups').doc('default_group').set({
+        [`memberMap.${myUid}`]: {
+          id: selfMember.id,
+          name: myName,
+          email: myEmail,
+          uid: myUid,
+          isSelf: false  // false for everyone else's perspective
+        }
+      }, { merge: true }).catch(() => {});
+    }
 
     // Listen in real time to the shared group so all friends with Google login stay synced!
     db.collection('shared_groups').doc('default_group').onSnapshot(doc => {
@@ -1739,11 +1795,32 @@ class FinFlowApp {
               const localIds = new Set((this.data.splits || []).map(s => s.id));
               const newSplits = group.splits.filter(s => !localIds.has(s.id));
 
-              // Identify "me" among the group members
-              const meMember = (group.members || []).find(m =>
-                m.email && m.email.toLowerCase() === myEmail
-              ) || this.data.groupMembers.find(m => m.isSelf);
-              const myMemberId = meMember ? meMember.id : 'm_you';
+              // ── ROBUST "who am I?" resolution ──────────────────────────────
+              // Strategy: match by Google email first (most reliable),
+              // then by uid stored in memberMap, then fall back to isSelf flag.
+              const memberMap = group.memberMap || {};  // { uid: { id, name, email } }
+
+              // 1. Try to find my member record in the shared group via memberMap (uid-keyed)
+              let myGroupRecord = memberMap[myUid];
+
+              // 2. If not in memberMap yet, search group.members by email
+              if (!myGroupRecord && group.members) {
+                myGroupRecord = group.members.find(m =>
+                  m.email && m.email.toLowerCase() === myEmail
+                );
+              }
+
+              // 3. If still not found, check local groupMembers by email
+              if (!myGroupRecord) {
+                myGroupRecord = this.data.groupMembers.find(m =>
+                  m.email && m.email.toLowerCase() === myEmail
+                );
+              }
+
+              // The member ID that represents ME in split's includedMemberIds / paidById
+              // This could be 'm_you' (if I recorded it) or 'm_1234567' (if friend added me)
+              const myMemberIdInGroup = myGroupRecord ? myGroupRecord.id : 'm_you';
+              const mySelfMember = this.data.groupMembers.find(m => m.isSelf) || { id: 'm_you', name: myName };
 
               // For each brand-new split synced from a friend, auto-generate Debt rows
               newSplits.forEach(sp => {
@@ -1753,20 +1830,26 @@ class FinFlowApp {
                 const splitId   = sp.id;
 
                 // Guard: don't duplicate debt rows that already exist for this split
-                const debtAlreadyExists = id =>
-                  this.data.debts.some(d => d.splitId === splitId && d.personId === id);
+                const debtAlreadyExists = otherId =>
+                  this.data.debts.some(d => d.splitId === splitId && d.personId === otherId);
 
-                const payerMember = (group.members || []).find(m => m.id === payerId) ||
+                // Find payer's display name from group members
+                const payerRecord = (group.members || []).find(m => m.id === payerId) ||
+                                    Object.values(memberMap).find(m => m.id === payerId) ||
                                     { name: 'A Friend', id: payerId };
 
-                if (included.includes(myMemberId) && payerId !== myMemberId) {
+                // Check if I am in this split (compare both my possible IDs)
+                const iAmIncluded = included.includes(myMemberIdInGroup) || included.includes('m_you');
+                const iAmThePayer = (payerId === myMemberIdInGroup) || (payerId === 'm_you');
+
+                if (iAmIncluded && !iAmThePayer) {
                   // ── Case A: I am IN the split but I did NOT pay ──
-                  // → Add "I Owe [payer]" debt to MY Debt tab
+                  // → Add "I Owe [payer]" debt row to MY Debt tab (LOCKED, payer-only settle)
                   if (!debtAlreadyExists(payerId)) {
                     this.data.debts.unshift({
                       id: 'debt_split_sync_' + Date.now() + '_' + splitId,
                       direction: 'I_OWE',
-                      personName: payerMember.name,
+                      personName: payerRecord.name,
                       personId: payerId,
                       totalAmount: share,
                       paidAmount: 0.00,
@@ -1775,24 +1858,27 @@ class FinFlowApp {
                       splitId: splitId,
                       isSplit: true,
                       paidById: payerId,
-                      canSettleByPayer: false, // LOCKED – only payer can confirm receipt
+                      canSettleByPayer: false,
                       dueDate: sp.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
                       status: 'ACTIVE',
                       createdAt: sp.createdAt || Date.now()
                     });
                     hasChanges = true;
                   }
-                } else if (payerId === myMemberId) {
-                  // ── Case B: I AM the payer ──
-                  // → Add "X Owes Me" debt row for each other member
+                } else if (iAmThePayer) {
+                  // ── Case B: I AM the payer in this split ──
+                  // → Add "X Owes Me" debt row for each other included member
                   included.forEach(memId => {
-                    if (memId !== myMemberId) {
-                      const friend = (group.members || []).find(m => m.id === memId) || { name: 'Friend', id: memId };
+                    const isThatMeAgain = (memId === myMemberIdInGroup) || (memId === 'm_you');
+                    if (!isThatMeAgain) {
+                      const friendRecord = (group.members || []).find(m => m.id === memId) ||
+                                           Object.values(memberMap).find(m => m.id === memId) ||
+                                           { name: 'Friend', id: memId };
                       if (!debtAlreadyExists(memId)) {
                         this.data.debts.unshift({
                           id: 'debt_split_sync_' + Date.now() + '_' + splitId + '_' + memId,
                           direction: 'OWED_TO_ME',
-                          personName: friend.name,
+                          personName: friendRecord.name,
                           personId: memId,
                           totalAmount: share,
                           paidAmount: 0.00,
@@ -1800,8 +1886,8 @@ class FinFlowApp {
                           reason: `Split: ${sp.title}`,
                           splitId: splitId,
                           isSplit: true,
-                          paidById: myMemberId,
-                          canSettleByPayer: true, // YOU paid → YOU can confirm
+                          paidById: myMemberIdInGroup,
+                          canSettleByPayer: true,
                           dueDate: sp.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
                           status: 'ACTIVE',
                           createdAt: sp.createdAt || Date.now()
