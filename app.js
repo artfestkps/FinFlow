@@ -307,7 +307,7 @@ class FinFlowApp {
               </div>
             </div>
           </div>
-          <span class="mono-num font-semibold text-sm ${acc.balance >= 0 ? 'text-slate-100' : 'text-rose-400'}">
+          <span class="mono-num font-bold text-base ${acc.balance >= 0 ? 'text-slate-100' : 'text-rose-400'}">
             ${this.formatMoney(acc.balance)}
           </span>
         </div>
@@ -341,7 +341,7 @@ class FinFlowApp {
                   <p class="text-xs text-slate-400">${tx.notes || (acc ? acc.name : 'Unknown Account')} • ${tx.date}</p>
                 </div>
               </div>
-              <span class="mono-num font-semibold text-sm ${isIncome ? 'text-emerald-400' : isExpense ? 'text-rose-400' : 'text-blue-400'}">
+              <span class="mono-num font-bold text-base ${isIncome ? 'text-emerald-400' : isExpense ? 'text-rose-400' : 'text-blue-400'}">
                 ${isIncome ? '+' : isExpense ? '-' : ''}${this.formatMoney(tx.amount)}
               </span>
             </div>

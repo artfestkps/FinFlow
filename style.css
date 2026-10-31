@@ -90,10 +90,29 @@ input, select, textarea {
   border-bottom: 2px solid #10B981;
 }
 
-/* Mobile Bottom Navigation */
-@media (max-width: 640px) {
+/* Mobile Optimization & Native App Zoom Scaling */
+@media (max-width: 768px) {
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    touch-action: manipulation;
+  }
+
+  .glass-panel {
+    border-radius: 1.25rem;
+  }
+
+  /* Touch-friendly inputs and buttons */
+  button, input, select {
+    min-height: 44px;
+  }
+
   .mobile-bottom-bar {
-    padding-bottom: env(safe-area-inset-bottom, 12px);
+    padding-bottom: env(safe-area-inset-bottom, 14px);
+    box-shadow: 0 -10px 30px -5px rgba(0, 0, 0, 0.8);
   }
 }
 
