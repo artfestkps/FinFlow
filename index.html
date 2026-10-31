@@ -398,6 +398,20 @@
         </button>
       </div>
 
+      <!-- Debt Sub-Filters (All Debts / Personal Loans / Split Debts) -->
+      <div class="flex items-center space-x-2 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800 w-full sm:w-auto self-start">
+        <button id="debt-filter-btn-ALL" onclick="app.setDebtFilter('ALL')" class="flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+          All Debts
+        </button>
+        <button id="debt-filter-btn-PERSONAL" onclick="app.setDebtFilter('PERSONAL')" class="flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-400 hover:text-white transition">
+          Personal Loans
+        </button>
+        <button id="debt-filter-btn-SPLIT" onclick="app.setDebtFilter('SPLIT')" class="flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-400 hover:text-white transition flex items-center justify-center space-x-1.5">
+          <i data-lucide="users" class="w-3.5 h-3.5"></i>
+          <span>Split Debts</span>
+        </button>
+      </div>
+
       <!-- Two-Column Grid: Owed to Me vs I Owe -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
@@ -441,39 +455,70 @@
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 class="text-2xl font-extrabold text-white">Group Bill Splitting</h2>
-          <p class="text-sm text-slate-400">Split shared expenses (dinners, trips, rent) with automatic debt & personal debit logging.</p>
+          <p class="text-sm text-slate-400">Automatic net adjustments, who owes whom, and payer-only settlements.</p>
         </div>
-        <div class="flex items-center space-x-2.5">
-          <button onclick="app.openAddMemberModal()" class="py-2 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center space-x-1.5 transition">
+        <div class="flex items-center space-x-2.5 w-full sm:w-auto">
+          <button onclick="app.openAddMemberModal()" class="flex-1 sm:flex-none py-2.5 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center justify-center space-x-1.5 transition">
             <i data-lucide="user-plus" class="w-4 h-4 text-indigo-400"></i>
-            <span>Add Friend</span>
+            <span>Add Friend / Email</span>
           </button>
-          <button onclick="app.openAddSplitModal()" class="py-2 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-bold text-xs sm:text-sm flex items-center space-x-2 shadow-lg shadow-indigo-500/25 transition">
+          <button onclick="app.openAddSplitModal()" class="flex-1 sm:flex-none py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center space-x-2 shadow-lg shadow-indigo-500/25 transition">
             <i data-lucide="plus" class="w-4 h-4 stroke-[3]"></i>
             <span>Record New Split</span>
           </button>
         </div>
       </div>
 
-      <!-- Group Header Bar -->
-      <div class="glass-panel p-4 rounded-2xl flex items-center justify-between border-indigo-500/30">
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-            <i data-lucide="users" class="w-5 h-5"></i>
+      <!-- Group Header & Members Summary -->
+      <div class="glass-panel p-5 rounded-2xl border-indigo-500/30 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+              <i data-lucide="users" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-base text-white">Friends & Roommates Group</h3>
+              <p class="text-xs text-slate-400">Debts automatically cancel out when multiple members pay over time</p>
+            </div>
           </div>
-          <div>
-            <h3 class="font-bold text-sm text-white">Friends & Roommates Group</h3>
-            <p class="text-xs text-slate-400">All member balances auto-adjust in your Debt ledger</p>
-          </div>
+          <span id="split-members-count" class="text-xs font-bold text-indigo-300 bg-indigo-500/20 border border-indigo-500/30 px-3 py-1 rounded-full">
+            1 Members
+          </span>
         </div>
-        <span id="split-members-count" class="text-xs font-bold text-indigo-300 bg-indigo-500/20 border border-indigo-500/30 px-3 py-1 rounded-full">
-          5 Members
-        </span>
+
+        <!-- Members pills preview -->
+        <div id="split-members-chips" class="flex flex-wrap gap-2 pt-2 border-t border-slate-800">
+          <!-- Rendered dynamically -->
+        </div>
       </div>
 
-      <!-- Splits History List -->
-      <div id="splits-history-list" class="space-y-4">
-        <!-- Dynamically rendered -->
+      <!-- WHO OWES WHOM: NET BALANCE & SETTLEMENT CARDS -->
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold text-base text-slate-100 flex items-center space-x-2">
+            <i data-lucide="scale" class="w-4 h-4 text-emerald-400"></i>
+            <span>Net Balances & Settlements</span>
+          </h3>
+          <span class="text-xs text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">Auto-Simplified</span>
+        </div>
+
+        <div id="split-net-balances-container" class="space-y-3">
+          <!-- Dynamically populated with who owes whom, mark as paid buttons, etc. -->
+        </div>
+      </div>
+
+      <!-- SPLIT TRANSACTIONS HISTORY -->
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold text-base text-slate-100 flex items-center space-x-2">
+            <i data-lucide="receipt" class="w-4 h-4 text-indigo-400"></i>
+            <span>Split Transactions History</span>
+          </h3>
+        </div>
+
+        <div id="splits-history-list" class="space-y-3">
+          <!-- Dynamically rendered -->
+        </div>
       </div>
     </div>
 

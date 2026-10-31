@@ -44,6 +44,7 @@ const DEFAULT_CATEGORIES = {
 class FinFlowApp {
   constructor() {
     this.currentTab = 'dashboard';
+    this.debtFilter = 'ALL';
     this.settings = this.loadSettings();
     this.data = this.loadData();
     this.chartInstance = null;
@@ -79,6 +80,7 @@ class FinFlowApp {
         const parsed = JSON.parse(saved);
         if (!parsed.groupMembers) parsed.groupMembers = DEFAULT_MEMBERS;
         if (!parsed.splits) parsed.splits = DEFAULT_SPLITS;
+        if (!parsed.settlements) parsed.settlements = [];
         if (!parsed.debts) parsed.debts = DEFAULT_DEBTS;
         if (!parsed.accounts || parsed.accounts.length === 0) parsed.accounts = DEFAULT_ACCOUNTS;
         if (!parsed.transactions) parsed.transactions = DEFAULT_TRANSACTIONS;
@@ -95,6 +97,7 @@ class FinFlowApp {
       debts: DEFAULT_DEBTS,
       groupMembers: DEFAULT_MEMBERS,
       splits: DEFAULT_SPLITS,
+      settlements: [],
       categories: DEFAULT_CATEGORIES
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
@@ -111,6 +114,20 @@ class FinFlowApp {
         const db = firebase.firestore();
         db.collection('users').doc(this.currentUser.uid).set(this.data, { merge: true })
           .catch(err => console.warn('Cloud sync write notice:', err));
+
+        // Sync shared group so friends with Google login see splits & settlements in real time!
+        const groupPayload = {
+          id: 'default_group',
+          name: 'Friends & Roommates Group',
+          members: this.data.groupMembers,
+          memberEmails: this.data.groupMembers.map(m => (m.email || '').toLowerCase()).filter(Boolean),
+          splits: this.data.splits || [],
+          settlements: this.data.settlements || [],
+          updatedAt: Date.now(),
+          updatedBy: this.currentUser.email || 'user'
+        };
+        db.collection('shared_groups').doc('default_group').set(groupPayload, { merge: true })
+          .catch(err => console.warn('Shared group write notice:', err));
       } catch (err) {
         console.warn('Cloud sync error:', err);
       }
@@ -520,24 +537,48 @@ class FinFlowApp {
   }
 
   // --- DEBTS & LOANS VIEW ---
+  setDebtFilter(filter) {
+    this.debtFilter = filter;
+    ['ALL', 'PERSONAL', 'SPLIT'].forEach(f => {
+      const btn = document.getElementById(`debt-filter-btn-${f}`);
+      if (btn) {
+        if (f === filter) {
+          btn.className = 'flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+        } else {
+          btn.className = 'flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-400 hover:text-white transition';
+        }
+      }
+    });
+    this.renderDebtsView();
+    if (window.lucide) window.lucide.createIcons();
+  }
+
   renderDebtsView() {
     const listOwedToMe = document.getElementById('debts-owed-to-me');
     const listIOwe = document.getElementById('debts-i-owe');
     if (!listOwedToMe || !listIOwe) return;
 
-    const owedToMe = this.data.debts.filter(d => d.direction === 'OWED_TO_ME');
-    const iOwe = this.data.debts.filter(d => d.direction === 'I_OWE');
+    let owedToMe = this.data.debts.filter(d => d.direction === 'OWED_TO_ME');
+    let iOwe = this.data.debts.filter(d => d.direction === 'I_OWE');
+
+    if (this.debtFilter === 'PERSONAL') {
+      owedToMe = owedToMe.filter(d => !d.isSplit);
+      iOwe = iOwe.filter(d => !d.isSplit);
+    } else if (this.debtFilter === 'SPLIT') {
+      owedToMe = owedToMe.filter(d => d.isSplit);
+      iOwe = iOwe.filter(d => d.isSplit);
+    }
 
     // Render "Owed to Me" (Receivables)
     if (owedToMe.length === 0) {
-      listOwedToMe.innerHTML = `<div class="p-6 text-center text-slate-500 text-sm">Nobody owes you money currently.</div>`;
+      listOwedToMe.innerHTML = `<div class="p-6 text-center text-slate-500 text-sm">No debts in this category currently.</div>`;
     } else {
       listOwedToMe.innerHTML = owedToMe.map(debt => this.renderDebtCard(debt)).join('');
     }
 
     // Render "I Owe" (Payables)
     if (iOwe.length === 0) {
-      listIOwe.innerHTML = `<div class="p-6 text-center text-slate-500 text-sm">You are completely debt free! Great job.</div>`;
+      listIOwe.innerHTML = `<div class="p-6 text-center text-slate-500 text-sm">You are completely debt free here! Great job.</div>`;
     } else {
       listIOwe.innerHTML = iOwe.map(debt => this.renderDebtCard(debt)).join('');
     }
@@ -548,8 +589,9 @@ class FinFlowApp {
     const progress = Math.min(100, Math.round(((debt.paidAmount || 0) / debt.totalAmount) * 100));
     const isSplit = Boolean(debt.isSplit);
 
-    // Permission Rule: For split debts where you are owed money, you are the payer and only YOU have the button to mark settled!
-    const canSettle = !isSplit || debt.direction === 'OWED_TO_ME' || debt.direction === 'I_OWE';
+    // Permission Rule:
+    // If it's a split debt and you owe money (I_OWE), YOU cannot mark it settled! Only the person who paid can mark it paid.
+    const canSettle = !isSplit || (debt.direction === 'OWED_TO_ME');
 
     return `
       <div class="glass-panel p-5 rounded-2xl relative border ${isSettled ? 'border-slate-800 opacity-60' : 'border-slate-700/60'}">
@@ -598,32 +640,243 @@ class FinFlowApp {
           </div>
         </div>
 
-        ${!isSettled && canSettle ? `
+        ${!isSettled ? (canSettle ? `
           <div class="mt-4 pt-3 border-t border-slate-700/50 flex space-x-2">
             <button onclick="app.openSettleModal('${debt.id}')" class="flex-1 py-2 px-3 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 font-semibold text-xs flex items-center justify-center space-x-1.5 transition">
               <i data-lucide="check-circle-2" class="w-4 h-4"></i>
               <span>${debt.direction === 'OWED_TO_ME' ? 'Mark as Paid / Received' : 'Record Payment Made'}</span>
             </button>
           </div>
-        ` : ''}
+        ` : `
+          <div class="mt-4 pt-3 border-t border-slate-700/50 flex items-center justify-between text-xs text-amber-400/90 bg-amber-500/10 px-3 py-2 rounded-xl border border-amber-500/20">
+            <span class="flex items-center space-x-1.5 font-medium">
+              <i data-lucide="lock" class="w-3.5 h-3.5"></i>
+              <span>From Split: Only <strong>${debt.personName}</strong> can mark this as settled</span>
+            </span>
+          </div>
+        `) : ''}
       </div>
     `;
   }
 
-  // --- SPLIT VIEW & ENGINE ---
+  // --- SPLIT VIEW & NET SETTLEMENT ENGINE ---
+  calculateGroupNetBalances() {
+    const members = this.data.groupMembers || [];
+    const splits = this.data.splits || [];
+    const settlements = this.data.settlements || [];
+    const myMember = members.find(m => m.isSelf || (this.currentUser && m.email && m.email.toLowerCase() === this.currentUser.email.toLowerCase())) || members[0];
+    const myId = myMember ? myMember.id : 'm_you';
+
+    // Directed matrix: matrix[A][B] = how much A owes B
+    const matrix = {};
+    members.forEach(m1 => {
+      matrix[m1.id] = {};
+      members.forEach(m2 => {
+        matrix[m1.id][m2.id] = 0;
+      });
+    });
+
+    // 1. Accumulate split debts
+    splits.forEach(sp => {
+      const payerId = sp.paidById;
+      const included = sp.includedMemberIds || [];
+      const share = Number(sp.perPersonShare) || 0;
+
+      included.forEach(memId => {
+        if (memId !== payerId && matrix[memId] && matrix[memId][payerId] !== undefined) {
+          matrix[memId][payerId] += share;
+        }
+      });
+    });
+
+    // 2. Subtract settlements (direct payments made)
+    settlements.forEach(st => {
+      const fromId = st.fromMemberId;
+      const toId = st.toMemberId;
+      const amount = Number(st.amount) || 0;
+      if (matrix[fromId] && matrix[fromId][toId] !== undefined) {
+        matrix[fromId][toId] -= amount;
+      }
+    });
+
+    // 3. Pairwise Netting (canceling out mutual balances)
+    const pairwiseNet = [];
+    for (let i = 0; i < members.length; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        const m1 = members[i];
+        const m2 = members[j];
+        const m1OwesM2 = matrix[m1.id][m2.id] || 0;
+        const m2OwesM1 = matrix[m2.id][m1.id] || 0;
+        const net = Number((m1OwesM2 - m2OwesM1).toFixed(2));
+
+        if (net > 0.009) {
+          pairwiseNet.push({
+            debtor: m1,
+            creditor: m2,
+            amount: net,
+            isYouDebtor: (m1.id === myId),
+            isYouCreditor: (m2.id === myId)
+          });
+        } else if (net < -0.009) {
+          pairwiseNet.push({
+            debtor: m2,
+            creditor: m1,
+            amount: Math.abs(net),
+            isYouDebtor: (m2.id === myId),
+            isYouCreditor: (m1.id === myId)
+          });
+        }
+      }
+    }
+
+    return { pairwiseNet, myId, myMember };
+  }
+
+  settleGroupNet(debtorId, creditorId, amount, debtorName) {
+    if (!confirm(`Confirm that ${debtorName} has paid you ${this.formatMoney(amount)}? This will settle their balance in the group.`)) return;
+
+    if (!this.data.settlements) this.data.settlements = [];
+    this.data.settlements.push({
+      id: 'set_' + Date.now(),
+      fromMemberId: debtorId,   // who paid
+      toMemberId: creditorId,   // who received (the payer who clicks this button)
+      amount: Number(amount),
+      date: new Date().toISOString().split('T')[0],
+      settledByName: (this.data.groupMembers.find(m => m.id === creditorId) || {}).name || 'You',
+      createdAt: Date.now()
+    });
+
+    // Mark ALL split debts between these two people as SETTLED in local Debt ledger
+    this.data.debts.forEach(d => {
+      if (d.isSplit) {
+        const isBetween =
+          (d.direction === 'OWED_TO_ME' && d.personId === debtorId) ||
+          (d.direction === 'I_OWE'      && d.personId === creditorId);
+        if (isBetween) {
+          d.status = 'SETTLED';
+          d.remainingAmount = 0.00;
+          d.paidAmount = d.totalAmount;
+        }
+      }
+    });
+
+    // saveData() will also push the updated settlements to Firestore shared_groups
+    // so the debtor's app will receive the settlement via onSnapshot and mark their
+    // "I Owe" rows as settled automatically.
+    this.saveData();
+    this.render();
+    this.showToast(`✅ Marked ${debtorName}'s balance as settled! Their app will update automatically.`, 'success');
+  }
+
   renderSplitView() {
     const list = document.getElementById('splits-history-list');
     const membersBadge = document.getElementById('split-members-count');
-    if (membersBadge) membersBadge.textContent = `${this.data.groupMembers.length} Members`;
+    const chipsContainer = document.getElementById('split-members-chips');
+    const netContainer = document.getElementById('split-net-balances-container');
 
+    const members = this.data.groupMembers || [];
+    if (membersBadge) membersBadge.textContent = `${members.length} Members`;
+
+    // Render member chips preview
+    if (chipsContainer) {
+      chipsContainer.innerHTML = members.map(m => `
+        <span class="text-xs px-2.5 py-1 rounded-xl bg-slate-800 text-slate-300 border border-slate-700/70 flex items-center space-x-1.5 font-medium">
+          <i data-lucide="${m.isSelf ? 'user' : 'user-check'}" class="w-3.5 h-3.5 ${m.isSelf ? 'text-emerald-400' : 'text-indigo-400'}"></i>
+          <span>${m.name} ${m.isSelf ? '(You)' : ''}</span>
+          ${m.email ? `<span class="text-[10px] text-slate-500 hidden sm:inline">(${m.email})</span>` : ''}
+        </span>
+      `).join('');
+    }
+
+    // Render Net Balances (Who Owes Whom Table/Cards)
+    if (netContainer) {
+      const { pairwiseNet } = this.calculateGroupNetBalances();
+
+      if (pairwiseNet.length === 0) {
+        netContainer.innerHTML = `
+          <div class="glass-panel p-5 rounded-2xl text-center border border-emerald-500/20 bg-emerald-500/5">
+            <div class="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-2">
+              <i data-lucide="check-check" class="w-5 h-5"></i>
+            </div>
+            <p class="font-bold text-slate-100 text-sm">All Group Balances Are Settled!</p>
+            <p class="text-xs text-slate-400 mt-1">Everyone is squared away. No one owes money to anyone in this group.</p>
+          </div>
+        `;
+      } else {
+        netContainer.innerHTML = pairwiseNet.map(item => {
+          if (item.isYouCreditor) {
+            // Case 1: Someone owes YOU money (You are the creditor and CAN mark paid!)
+            return `
+              <div class="glass-panel p-4 sm:p-5 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="flex items-center space-x-3">
+                  <div class="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <i data-lucide="arrow-down-left" class="w-5 h-5"></i>
+                  </div>
+                  <div>
+                    <div class="flex items-center space-x-2">
+                      <span class="font-bold text-slate-100 text-sm sm:text-base">${item.debtor.name}</span>
+                      <span class="text-xs text-emerald-400 font-semibold">owes you</span>
+                    </div>
+                    <p class="mono-num font-black text-xl text-emerald-400">${this.formatMoney(item.amount)}</p>
+                  </div>
+                </div>
+
+                <button onclick="app.settleGroupNet('${item.debtor.id}', '${item.creditor.id}', ${item.amount}, '${item.debtor.name}')" 
+                  class="py-2 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs sm:text-sm flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-500/20 transition active:scale-95">
+                  <i data-lucide="check" class="w-4 h-4 stroke-[3]"></i>
+                  <span>Mark as Paid</span>
+                </button>
+              </div>
+            `;
+          } else if (item.isYouDebtor) {
+            // Case 2: YOU owe someone money (You are the debtor - LOCKED, only creditor can confirm)
+            return `
+              <div class="glass-panel p-4 sm:p-5 rounded-2xl border border-rose-500/30 bg-rose-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="flex items-center space-x-3">
+                  <div class="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
+                    <i data-lucide="arrow-up-right" class="w-5 h-5"></i>
+                  </div>
+                  <div>
+                    <div class="flex items-center space-x-2">
+                      <span class="text-xs text-rose-300 font-semibold">You owe</span>
+                      <span class="font-bold text-slate-100 text-sm sm:text-base">${item.creditor.name}</span>
+                    </div>
+                    <p class="mono-num font-black text-xl text-rose-400">${this.formatMoney(item.amount)}</p>
+                  </div>
+                </div>
+
+                <div class="text-xs text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/20 flex items-center space-x-1 font-medium">
+                  <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+                  <span>Waiting for ${item.creditor.name} to confirm payment</span>
+                </div>
+              </div>
+            `;
+          } else {
+            // Case 3: Balance between other two members
+            return `
+              <div class="glass-panel p-3.5 sm:p-4 rounded-2xl border border-slate-700/60 bg-slate-800/30 flex items-center justify-between text-xs sm:text-sm">
+                <div class="flex items-center space-x-2">
+                  <span class="font-semibold text-slate-200">${item.debtor.name}</span>
+                  <span class="text-slate-400">owes</span>
+                  <span class="font-semibold text-slate-200">${item.creditor.name}</span>
+                </div>
+                <span class="mono-num font-bold text-indigo-300 text-sm sm:text-base">${this.formatMoney(item.amount)}</span>
+              </div>
+            `;
+          }
+        }).join('');
+      }
+    }
+
+    // Render Split History List
     if (!list) return;
 
     if (!this.data.splits || this.data.splits.length === 0) {
       list.innerHTML = `
-        <div class="p-12 text-center text-slate-500 border border-dashed border-slate-700 rounded-2xl">
-          <i data-lucide="users" class="w-12 h-12 mx-auto mb-3 opacity-40 text-indigo-400"></i>
-          <p class="text-base font-semibold text-slate-300">No group splits recorded yet</p>
-          <p class="text-xs text-slate-500 mt-1">Tap the "+ Record New Split" button to split a dinner, roadtrip, or rent!</p>
+        <div class="p-10 text-center text-slate-500 border border-dashed border-slate-700 rounded-2xl">
+          <i data-lucide="receipt" class="w-10 h-10 mx-auto mb-2 opacity-40 text-indigo-400"></i>
+          <p class="text-sm font-semibold text-slate-300">No split transactions recorded yet</p>
+          <p class="text-xs text-slate-500 mt-0.5">Tap the "+ Record New Split" button to split dinner, petrol, or groceries!</p>
         </div>
       `;
       return;
@@ -637,11 +890,11 @@ class FinFlowApp {
       });
 
       return `
-        <div class="glass-panel p-5 sm:p-6 rounded-2xl border border-slate-700/70 hover:border-indigo-500/40 transition relative group">
+        <div class="glass-panel p-4 sm:p-5 rounded-2xl border border-slate-700/70 hover:border-indigo-500/40 transition relative group">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div class="flex items-center space-x-2">
-                <h4 class="font-bold text-slate-100 text-lg">${sp.title}</h4>
+                <h4 class="font-bold text-slate-100 text-base sm:text-lg">${sp.title}</h4>
                 <span class="text-xs px-2.5 py-0.5 rounded-full font-bold ${isPaidByMe ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'}">
                   ${isPaidByMe ? '✓ Paid by You' : `Paid by ${sp.paidBy}`}
                 </span>
@@ -661,9 +914,9 @@ class FinFlowApp {
           </div>
 
           <!-- Included Members Chips -->
-          <div class="mt-4 pt-3 border-t border-slate-700/50">
-            <span class="text-xs font-semibold text-slate-400">Included Members (${includedNames.length}):</span>
-            <div class="flex flex-wrap gap-1.5 mt-2">
+          <div class="mt-3.5 pt-3 border-t border-slate-700/50">
+            <span class="text-xs font-semibold text-slate-400">Split between (${includedNames.length}):</span>
+            <div class="flex flex-wrap gap-1.5 mt-1.5">
               ${includedNames.map(name => `
                 <span class="text-xs px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700/60 font-medium flex items-center space-x-1">
                   <span>${name}</span>
@@ -671,17 +924,6 @@ class FinFlowApp {
                 </span>
               `).join('')}
             </div>
-          </div>
-
-          <!-- Net Outcome Banner -->
-          <div class="mt-4 p-3 rounded-xl ${isPaidByMe ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'} flex items-center justify-between text-xs font-semibold">
-            <span>
-              ${isPaidByMe 
-                ? `Your share is ${this.formatMoney(sp.yourShare)} (recorded as personal expense). You are getting back ${this.formatMoney(sp.totalAmount - sp.yourShare)} from ${includedNames.length - 1} members.`
-                : `Your share is ${this.formatMoney(sp.yourShare)} (recorded under 'I Owe' to ${sp.paidBy}).`
-              }
-            </span>
-            <button onclick="app.switchTab('debts')" class="underline hover:text-white ml-2 flex-shrink-0">View in Debts ➔</button>
           </div>
         </div>
       `;
@@ -1452,7 +1694,166 @@ class FinFlowApp {
         db.collection('users').doc(uid).set(this.data, { merge: true })
           .catch(e => console.warn('Initial cloud sync notice:', e));
       }
-    }).catch(err => console.warn('Cloud sync read notice:', err));
+      this.syncSharedGroupsWithFirestore();
+    }).catch(err => {
+      console.warn('Cloud sync read notice:', err);
+      this.syncSharedGroupsWithFirestore();
+    });
+  }
+
+  syncSharedGroupsWithFirestore() {
+    if (!window.firebase || !this.currentUser) return;
+    const db = firebase.firestore();
+
+    // Determine who "I" am in the group by matching signed-in email
+    const myEmail = (this.currentUser.email || '').toLowerCase();
+
+    // Listen in real time to the shared group so all friends with Google login stay synced!
+    db.collection('shared_groups').doc('default_group').onSnapshot(doc => {
+      if (doc.exists) {
+        const group = doc.data();
+        if (group) {
+          let hasChanges = false;
+
+          // ── 1. Merge members ──────────────────────────────────────────────
+          if (group.members && Array.isArray(group.members)) {
+            group.members.forEach(gm => {
+              const exists = this.data.groupMembers.find(m =>
+                m.id === gm.id ||
+                (m.email && gm.email && m.email.toLowerCase() === gm.email.toLowerCase())
+              );
+              if (!exists) {
+                this.data.groupMembers.push(gm);
+                hasChanges = true;
+              }
+            });
+          }
+
+          // ── 2. Merge splits & auto-create Debt entries for THIS user ──────
+          if (group.splits && Array.isArray(group.splits)) {
+            const remoteSplitsJson = JSON.stringify(group.splits);
+            const localSplitsJson  = JSON.stringify(this.data.splits);
+
+            if (remoteSplitsJson !== localSplitsJson) {
+              // Find splits that are new (not yet in local list)
+              const localIds = new Set((this.data.splits || []).map(s => s.id));
+              const newSplits = group.splits.filter(s => !localIds.has(s.id));
+
+              // Identify "me" among the group members
+              const meMember = (group.members || []).find(m =>
+                m.email && m.email.toLowerCase() === myEmail
+              ) || this.data.groupMembers.find(m => m.isSelf);
+              const myMemberId = meMember ? meMember.id : 'm_you';
+
+              // For each brand-new split synced from a friend, auto-generate Debt rows
+              newSplits.forEach(sp => {
+                const payerId   = sp.paidById;
+                const included  = sp.includedMemberIds || [];
+                const share     = Number(sp.perPersonShare) || 0;
+                const splitId   = sp.id;
+
+                // Guard: don't duplicate debt rows that already exist for this split
+                const debtAlreadyExists = id =>
+                  this.data.debts.some(d => d.splitId === splitId && d.personId === id);
+
+                const payerMember = (group.members || []).find(m => m.id === payerId) ||
+                                    { name: 'A Friend', id: payerId };
+
+                if (included.includes(myMemberId) && payerId !== myMemberId) {
+                  // ── Case A: I am IN the split but I did NOT pay ──
+                  // → Add "I Owe [payer]" debt to MY Debt tab
+                  if (!debtAlreadyExists(payerId)) {
+                    this.data.debts.unshift({
+                      id: 'debt_split_sync_' + Date.now() + '_' + splitId,
+                      direction: 'I_OWE',
+                      personName: payerMember.name,
+                      personId: payerId,
+                      totalAmount: share,
+                      paidAmount: 0.00,
+                      remainingAmount: share,
+                      reason: `Split: ${sp.title}`,
+                      splitId: splitId,
+                      isSplit: true,
+                      paidById: payerId,
+                      canSettleByPayer: false, // LOCKED – only payer can confirm receipt
+                      dueDate: sp.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+                      status: 'ACTIVE',
+                      createdAt: sp.createdAt || Date.now()
+                    });
+                    hasChanges = true;
+                  }
+                } else if (payerId === myMemberId) {
+                  // ── Case B: I AM the payer ──
+                  // → Add "X Owes Me" debt row for each other member
+                  included.forEach(memId => {
+                    if (memId !== myMemberId) {
+                      const friend = (group.members || []).find(m => m.id === memId) || { name: 'Friend', id: memId };
+                      if (!debtAlreadyExists(memId)) {
+                        this.data.debts.unshift({
+                          id: 'debt_split_sync_' + Date.now() + '_' + splitId + '_' + memId,
+                          direction: 'OWED_TO_ME',
+                          personName: friend.name,
+                          personId: memId,
+                          totalAmount: share,
+                          paidAmount: 0.00,
+                          remainingAmount: share,
+                          reason: `Split: ${sp.title}`,
+                          splitId: splitId,
+                          isSplit: true,
+                          paidById: myMemberId,
+                          canSettleByPayer: true, // YOU paid → YOU can confirm
+                          dueDate: sp.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+                          status: 'ACTIVE',
+                          createdAt: sp.createdAt || Date.now()
+                        });
+                        hasChanges = true;
+                      }
+                    }
+                  });
+                }
+              });
+
+              this.data.splits = group.splits;
+              hasChanges = true;
+            }
+          }
+
+          // ── 3. Merge settlements & apply to split debts ───────────────────
+          if (group.settlements && Array.isArray(group.settlements)) {
+            const localSettJson  = JSON.stringify(this.data.settlements || []);
+            const remoteSettJson = JSON.stringify(group.settlements);
+            if (remoteSettJson !== localSettJson) {
+              // Apply any newly settled amounts to local debt rows
+              const existingSettIds = new Set((this.data.settlements || []).map(s => s.id));
+              group.settlements.forEach(st => {
+                if (!existingSettIds.has(st.id)) {
+                  // Mark matching split debts as settled
+                  this.data.debts.forEach(d => {
+                    if (d.isSplit && d.splitId) {
+                      const isBetweenThem =
+                        (d.direction === 'I_OWE'       && d.personId === st.toMemberId)   ||
+                        (d.direction === 'OWED_TO_ME'  && d.personId === st.fromMemberId);
+                      if (isBetweenThem) {
+                        d.status = 'SETTLED';
+                        d.remainingAmount = 0.00;
+                        d.paidAmount = d.totalAmount;
+                      }
+                    }
+                  });
+                }
+              });
+              this.data.settlements = group.settlements;
+              hasChanges = true;
+            }
+          }
+
+          if (hasChanges) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
+            this.render();
+          }
+        }
+      }
+    }, err => console.warn('Real-time shared group listener notice:', err));
   }
 
   closeAllModals() {
